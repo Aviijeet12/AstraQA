@@ -1,10 +1,10 @@
-// scripts/kb-worker.ts
 import { prisma } from "../lib/prisma";
 import { supabase } from "../lib/supabase";
 import { parsePDFBuffer, parseJSONBuffer } from "../utils/fileParser";
 import { splitTextIntoChunks } from "../utils/textSplitter";
 import { embedText } from "../lib/huggingface";
 import { ensureCollection, upsertPoints } from "../lib/qdrant";
+
 
 async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 

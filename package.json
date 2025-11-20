@@ -1,6 +1,7 @@
 {
   "name": "astraqa",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "scripts": {
     "build": "next build",
@@ -40,6 +41,7 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@supabase/supabase-js": "^2.83.0",
+    "@vercel/analytics": "^1.5.0",
     "autoprefixer": "10.4.22",
     "bcryptjs": "3.0.3",
     "class-variance-authority": "0.7.1",
@@ -48,9 +50,11 @@
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
     "input-otp": "1.4.1",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "0.454.0",
     "next": "16.0.3",
     "next-auth": "4.24.13",
+    "next-themes": "^0.4.6",
     "pdf-parse": "^2.4.5",
     "react": "19.2.0",
     "react-day-picker": "9.8.0",
@@ -65,6 +69,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.17",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "22.19.1",
     "@types/react": "19.2.6",
     "@types/react-dom": "19.2.3",
