@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
-import { prisma } from "@/lib/prisma";  // must exist
-import jwt from "jsonwebtoken";
+import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
   try {
-    const { email, password, name } = await req.json();
+    const body = await req.json();
+    const { email, password, name } = body;
 
     if (!email || !password) {
       return NextResponse.json(
-        { error: "Email and password are required" },
+        { error: "Email & password are required" },
         { status: 400 }
       );
     }
 
-    // check if user exists
-    const existing = await prisma.user.findUnique({ where: { email } });
+    // check existing user
+    const existing = await prisma.user.findUnique({
+      where: { email },
+    });
 
     if (existing) {
       return NextResponse.json(
@@ -35,21 +37,23 @@ export async function POST(req: Request) {
       },
     });
 
-    // generate token
-    const token = jwt.sign(
-      { id: newUser.id, email: newUser.email },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
-    );
-
     return NextResponse.json(
-      { user: newUser, token },
+      {
+        success: true,
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          name: newUser.name,
+        },
+      },
       { status: 201 }
     );
-  } catch (error: any) {
-    console.error("Signup error", error);
+  } catch (err) {
+    console.error("SIGNUP API ERROR →", err);
+
+    // Important: Return JSON, NOT anything else
     return NextResponse.json(
-      { error: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
