@@ -1,23 +1,37 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { verify } from "jsonwebtoken";
 
 export async function GET(req: Request) {
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) return NextResponse.json({ user: null });
+    const cookieHeader = req.headers.get("cookie");
+    if (!cookieHeader) {
+      return NextResponse.json({ user: null }, { status: 401 });
+    }
 
-    const token = authHeader.replace("Bearer ", "");
+    const token = cookieHeader
+      .split("; ")
+      .find((c) => c.startsWith("token="))
+      ?.split("=")[1];
 
-    const decoded = verify(token, process.env.AUTH_SECRET!) as { userId: string };
+    if (!token) {
+      return NextResponse.json({ user: null }, { status: 401 });
+    }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, email: true, name: true },
-    });
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      console.error("❌ Missing JWT_SECRET");
+      return NextResponse.json(
+        { error: "Server config missing" },
+        { status: 500 }
+      );
+    }
 
-    return NextResponse.json({ user });
-  } catch (err) {
-    return NextResponse.json({ user: null });
+    const user = verify(token, secret);
+    return NextResponse.json({ user }, { status: 200 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
   }
 }
