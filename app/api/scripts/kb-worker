@@ -1,0 +1,132 @@
+// scripts/kb-worker.ts
+import { prisma } from "../lib/prisma";
+import { supabase } from "../lib/supabase";
+import { parsePDFBuffer, parseJSONBuffer } from "../utils/fileParser";
+import { splitTextIntoChunks } from "../utils/textSplitter";
+import { embedText } from "../lib/huggingface";
+import { ensureCollection, upsertPoints } from "../lib/qdrant";
+
+async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+async function processJob(jobId: string) {
+  console.log("Processing job", jobId);
+  await prisma.knowledgeBaseJob.update({ where: { id: jobId }, data: { status: "processing", attempt: { increment: 1 } } });
+
+  try {
+    const job = await prisma.knowledgeBaseJob.findUnique({ where: { id: jobId }, include: { File: true }});
+    if (!job) throw new Error("Job not found");
+
+    const file = job.File;
+    if (!file) throw new Error("File not attached");
+
+    // Download from Supabase
+    const { data, error: dlError } = await supabase.storage.from(process.env.SUPABASE_BUCKET!).download(file.path);
+    if (dlError) throw dlError;
+
+    const arrayBuffer = await data.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Parse by extension or mime
+    let text = "";
+    if (file.mime === "application/pdf" || file.filename.toLowerCase().endsWith(".pdf")) {
+      text = await parsePDFBuffer(buffer);
+    } else if (file.filename.toLowerCase().endsWith(".json") || file.mime === "application/json") {
+      text = await parseJSONBuffer(buffer);
+    } else {
+      // fallback to utf-8 text
+      text = buffer.toString("utf-8");
+    }
+
+    if (!text || text.trim().length === 0) {
+      throw new Error("Parsed text empty");
+    }
+
+    // Split
+    const maxChars = parseInt(process.env.VECTOR_CHUNK_MAX_CHARS || "1500", 10);
+    const chunks = splitTextIntoChunks(text, maxChars, 200);
+
+    // For embedding dimension detection, embed one sample
+    const firstEmbedding = await embedText(chunks[0].slice(0, Math.min(1000, chunks[0].length)));
+    const dim = firstEmbedding.length;
+    await ensureCollection(dim);
+
+    const pointsToUpsert = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkText = chunks[i];
+      const vector = await embedText(chunkText);
+      const qdrantId = `${file.id}::${i}`; // stable id
+
+      // Save chunk metadata
+      await prisma.chunk.create({
+        data: {
+          fileId: file.id,
+          index: i,
+          text: chunkText,
+          qdrantId,
+        },
+      });
+
+      pointsToUpsert.push({
+        id: qdrantId,
+        vector,
+        payload: {
+          fileId: file.id,
+          index: i,
+          filename: file.filename,
+        },
+      });
+
+      // push in batches every 64
+      if (pointsToUpsert.length >= 64) {
+        await upsertPoints(pointsToUpsert.splice(0));
+      }
+    }
+
+    // upsert any remaining
+    if (pointsToUpsert.length > 0) {
+      await upsertPoints(pointsToUpsert);
+    }
+
+    // mark job done
+    await prisma.knowledgeBaseJob.update({
+      where: { id: jobId },
+      data: { status: "done" },
+    });
+
+    console.log("Job done", jobId);
+  } catch (err: any) {
+    console.error("Job failed", jobId, err);
+    await prisma.knowledgeBaseJob.update({
+      where: { id: jobId },
+      data: { status: "failed", error: String(err).slice(0, 1000) },
+    });
+  }
+}
+
+async function pollLoop() {
+  console.log("KB worker started, polling for jobs...");
+  while (true) {
+    try {
+      // find pending job, oldest first
+      const job = await prisma.knowledgeBaseJob.findFirst({
+        where: { status: "pending" },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (job) {
+        await processJob(job.id);
+      } else {
+        // sleep 5s when no job
+        await sleep(5000);
+      }
+    } catch (err) {
+      console.error("Worker error:", err);
+      await sleep(5000);
+    }
+  }
+}
+
+pollLoop().catch(err => {
+  console.error("Fatal worker error", err);
+  process.exit(1);
+});

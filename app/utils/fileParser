@@ -1,0 +1,19 @@
+// utils/fileParser.ts
+import pdf from "pdf-parse";
+
+export async function parsePDFBuffer(buffer: Buffer): Promise<string> {
+  const data = await pdf(buffer);
+  return data.text || "";
+}
+
+export async function parseJSONBuffer(buffer: Buffer): Promise<string> {
+  const text = buffer.toString("utf-8");
+  try {
+    const obj = JSON.parse(text);
+    // If it's an object, stringify with indentation
+    return typeof obj === "object" ? JSON.stringify(obj, null, 2) : text;
+  } catch {
+    // If not JSON, return raw text
+    return text;
+  }
+}

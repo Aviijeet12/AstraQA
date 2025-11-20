@@ -1,0 +1,32 @@
+// lib/huggingface.ts
+export async function embedText(text: string): Promise<number[]> {
+  const HF_API_KEY = process.env.HF_API_KEY;
+  if (!HF_API_KEY) throw new Error("HF_API_KEY missing");
+
+  // Use a small embedding model
+  const model = "sentence-transformers/all-MiniLM-L6-v2";
+
+  const res = await fetch(`https://api-inference.huggingface.co/embeddings`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${HF_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model, input: text }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`HF embedding failed: ${res.status} ${txt}`);
+  }
+
+  const j = await res.json();
+  // HF usually returns { data: [ { embeddings: [...] } ] } or { embedding: [...] }
+  if (Array.isArray(j.data) && j.data[0]?.embedding) {
+    return j.data[0].embedding as number[];
+  }
+  if (j.embedding) return j.embedding as number[];
+  // sometimes older responses:
+  if (Array.isArray(j)) return j[0] as number[];
+  throw new Error("Unexpected HF response shape: " + JSON.stringify(j).slice(0, 500));
+}

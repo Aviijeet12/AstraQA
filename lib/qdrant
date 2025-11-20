@@ -1,0 +1,53 @@
+// lib/qdrant.ts
+const QDRANT_URL = process.env.QDRANT_URL;
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
+const COLLECTION = process.env.VECTOR_COLLECTION_NAME || "astraqa_kb";
+
+if (!QDRANT_URL || !QDRANT_API_KEY) {
+  throw new Error("Missing QDRANT_URL or QDRANT_API_KEY");
+}
+
+export async function ensureCollection(dim: number) {
+  const url = `${QDRANT_URL}/collections/${COLLECTION}`;
+  // Check if exists
+  const info = await fetch(url, {
+    headers: { "api-key": QDRANT_API_KEY },
+  });
+
+  if (info.ok) {
+    return;
+  }
+
+  // Create collection
+  const createRes = await fetch(`${QDRANT_URL}/collections/${COLLECTION}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": QDRANT_API_KEY,
+    },
+    body: JSON.stringify({
+      vectors: { size: dim, distance: "Cosine" },
+    }),
+  });
+
+  if (!createRes.ok) {
+    throw new Error("Failed to create Qdrant collection: " + await createRes.text());
+  }
+}
+
+export async function upsertPoints(points: { id: string; vector: number[]; payload?: any }[]) {
+  const url = `${QDRANT_URL}/collections/${COLLECTION}/points?wait=true`;
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": QDRANT_API_KEY,
+    },
+    body: JSON.stringify({ points }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Qdrant upsert failed: ${res.status} ${txt}`);
+  }
+  return await res.json();
+}

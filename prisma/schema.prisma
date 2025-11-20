@@ -5,7 +5,6 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  // Connection URL is configured via prisma.config.ts / PrismaClient
 }
 
 model User {
@@ -16,85 +15,82 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  files     File[]
-  testCases TestCase[]
-  scripts   Script[]
-  settings  Settings?
+  // relations
+  knowledgeBaseStatus KnowledgeBaseStatus?
+  testCases           TestCase[]
+  scripts             Script[]
+  settings            UserSettings?
+  File                File[]
+}
+
+model KnowledgeBaseStatus {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @unique
+  status    String
+  updatedAt DateTime @updatedAt
 }
 
 model File {
-  id          String   @id @default(cuid())
-  user        User     @relation(fields: [userId], references: [id])
-  userId      String
-  name        String
-  mimeType    String
-  sizeBytes   Int
-  supabaseKey String   // path/key inside Supabase bucket
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  chunks Chunk[]
-}
-
-model Chunk {
-  id        String   @id @default(cuid())
-  file      File     @relation(fields: [fileId], references: [id])
-  fileId    String
-  index     Int
-  content   String
-  embedding Bytes?    // optional; primary embeddings live in Chroma
-  createdAt DateTime @default(now())
+  id               String             @id @default(cuid())
+  user             User?              @relation(fields: [userId], references: [id])
+  userId           String?
+  filename         String
+  path             String
+  mime             String
+  createdAt        DateTime           @default(now())
+  KnowledgeBaseJob KnowledgeBaseJob[]
+  Chunk            Chunk[]
 }
 
 model TestCase {
-  id            String   @id @default(cuid())
-  user          User     @relation(fields: [userId], references: [id])
-  userId        String
-  externalId    String   // e.g. "TC-001"
-  feature       String
-  scenario      String
-  steps         String   // JSON string array
-  expectedResult String
-  type          String   // "positive" | "negative"
-  createdAt     DateTime @default(now())
-
-  scripts Script[]
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  testId    String
+  feature   String
+  scenario  String
+  steps     Json
+  expected  String
+  type      String
+  createdAt DateTime @default(now())
 }
 
 model Script {
   id         String   @id @default(cuid())
   user       User     @relation(fields: [userId], references: [id])
   userId     String
-  testCase   TestCase @relation(fields: [testCaseId], references: [id])
   testCaseId String
-  title      String
-  language   String   // e.g. "python-selenium"
-  content    String   // full script source
+  code       String   @db.Text
   createdAt  DateTime @default(now())
 }
 
-model Settings {
-  id                String   @id @default(cuid())
-  user              User     @relation(fields: [userId], references: [id])
-  userId            String   @unique
-  browserPreference String?  // e.g. "chrome", "firefox"
-  timeoutSeconds    Int?     // default wait timeout
-  theme             String?  // "light" | "dark" | etc.
-  llmProvider       String?  // e.g. "gemini-1.5-flash"
-  vectorDbProvider  String?  // e.g. "chroma-local"
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+model UserSettings {
+  id      String  @id @default(cuid())
+  user    User    @relation(fields: [userId], references: [id])
+  userId  String  @unique
+  theme   String?
+  browser String?
 }
 
-model KnowledgeBaseStatus {
-  id             String   @id @default(cuid())
-  user           User     @relation(fields: [userId], references: [id])
-  userId         String   @unique
-  status         String   // "empty" | "building" | "ready" | "error"
-  lastBuildAt    DateTime?
-  lastError      String?
-  filesIndexed   Int      @default(0)
-  chunksIndexed  Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+model KnowledgeBaseJob {
+  id        String   @id @default(cuid())
+  userId    String?
+  fileId    String
+  status    String   @default("pending") // pending, processing, done, failed
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  attempt   Int      @default(0)
+  error     String?  @db.Text
+  File      File     @relation(fields: [fileId], references: [id])
+}
+
+model Chunk {
+  id        String   @id @default(cuid())
+  fileId    String
+  index     Int
+  text      String   @db.Text
+  qdrantId  String? // optional: id used in Qdrant
+  createdAt DateTime @default(now())
+  File      File     @relation(fields: [fileId], references: [id])
 }

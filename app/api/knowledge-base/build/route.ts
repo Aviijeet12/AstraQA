@@ -1,17 +1,24 @@
-import { NextResponse } from "next/server"
+// app/api/knowledge-base/build/route.ts
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
-export const runtime = "nodejs"
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { fileId, userId } = body;
+    if (!fileId) {
+      return NextResponse.json({ error: "fileId required" }, { status: 400 });
+    }
 
-export async function POST() {
-  // In a real implementation this would:
-  // - read uploaded documents
-  // - chunk and embed content
-  // - persist vectors in a DB
-  // For now we just simulate a successful build.
+    const file = await prisma.file.findUnique({ where: { id: fileId }});
+    if (!file) return NextResponse.json({ error: "file not found" }, { status: 404 });
 
-  return NextResponse.json({
-    status: "ready",
-    message: "Knowledge base built successfully",
-    completedAt: new Date().toISOString(),
-  })
+    const job = await prisma.knowledgeBaseJob.create({
+      data: { fileId, userId: userId ?? null, status: "pending" },
+    });
+
+    return NextResponse.json({ ok: true, jobId: job.id });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
