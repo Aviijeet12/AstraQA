@@ -17,6 +17,9 @@ export default function KnowledgeBasePage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [buildProgress, setBuildProgress] = useState(0)
   const [buildStep, setBuildStep] = useState<string>("")
+  const { selectedFileId, setSelectedFileId } = useApp()
+
+  const selectedFile = files.find((f) => f.id === selectedFileId) || files[0] || null
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -175,9 +178,14 @@ export default function KnowledgeBasePage() {
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {files.map((file) => (
-                    <div
+                    <button
                       key={file.id}
-                      className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group"
+                      type="button"
+                      onClick={() => setSelectedFileId(file.id)}
+                      className={cn(
+                        "flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group w-full text-left",
+                        selectedFileId === file.id && "border-primary bg-primary/5",
+                      )}
                     >
                       <div className="flex items-center gap-3 overflow-hidden">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-primary/10 text-primary">
@@ -194,11 +202,14 @@ export default function KnowledgeBasePage() {
                         variant="ghost"
                         size="icon"
                         className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => removeFile(file.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeFile(file.id)
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardContent>
@@ -279,8 +290,23 @@ export default function KnowledgeBasePage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="h-[200px] rounded-md border bg-muted/50 p-4 flex items-center justify-center text-muted-foreground text-sm">
-                Select a file to preview content
+              <div className="h-[200px] rounded-md border bg-muted/50 p-4 text-sm overflow-auto">
+                {selectedFile ? (
+                  <div className="space-y-1">
+                    <p className="font-medium">{selectedFile.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {selectedFile.size} • {selectedFile.type.toUpperCase()} •{" "}
+                      {selectedFile.uploadDate.toLocaleString()}
+                    </p>
+                    <p className="mt-3 text-muted-foreground">
+                      File content preview is not implemented yet. This panel shows which file is currently selected.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-muted-foreground">
+                    No files uploaded yet.
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

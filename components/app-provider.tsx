@@ -25,6 +25,8 @@ type AppContextType = {
   addFile: (file: FileData) => void
   removeFile: (id: string) => void
   setFiles: (files: FileData[]) => void
+  selectedFileId: string | null
+  setSelectedFileId: (id: string | null) => void
   kbStatus: "empty" | "building" | "ready"
   setKbStatus: (status: "empty" | "building" | "ready") => void
   testCases: TestCase[]
@@ -39,6 +41,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [files, setFiles] = useState<FileData[]>([])
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
   const [kbStatus, setKbStatus] = useState<"empty" | "building" | "ready">("empty")
   const [testCases, setTestCases] = useState<TestCase[]>([])
   const [selectedTestCase, setSelectedTestCase] = useState<TestCase | null>(null)
@@ -59,6 +62,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addFile,
         removeFile,
         setFiles,
+        selectedFileId,
+        setSelectedFileId,
         kbStatus,
         setKbStatus,
         testCases,
