@@ -213,17 +213,7 @@ export default function LandingPage() {
             </div>
             <span className="text-sm font-bold">AstraQA Engine</span>
           </div>
-          <p className="text-sm text-muted-foreground">© 2025 AstraQA Engine. All rights reserved.</p>
           <div className="flex gap-6 text-sm text-muted-foreground">
-            <Link href="#" className="hover:text-foreground">
-              Privacy
-            </Link>
-            <Link href="#" className="hover:text-foreground">
-              Terms
-            </Link>
-            <Link href="#" className="hover:text-foreground">
-              Contact
-            </Link>
           </div>
         </div>
       </footer>
