@@ -1,6 +1,6 @@
 {
-  "buildCommand": "corepack prepare pnpm@8.6.0 --activate && pnpm install && pnpm build",
-  "installCommand": "corepack prepare pnpm@8.6.0 --activate && pnpm install",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm run build",
   "build": {
     "env": {
       "NODE_VERSION": "20"
