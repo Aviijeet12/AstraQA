@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "start": "next start",
-    "kb-worker": "ts-node --esm scripts/kb-worker.ts"
+    "kb-worker": "ts-node --esm scripts/kb-worker.ts",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@hookform/resolvers": "3.10.0",
