@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState } from "react"
+import { SessionProvider } from "next-auth/react"
 
 export type FileData = {
   id: string
@@ -56,26 +57,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppContext.Provider
-      value={{
-        files,
-        addFile,
-        removeFile,
-        setFiles,
-        selectedFileId,
-        setSelectedFileId,
-        kbStatus,
-        setKbStatus,
-        testCases,
-        setTestCases,
-        selectedTestCase,
-        setSelectedTestCase,
-        generatedScript,
-        setGeneratedScript,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+    <SessionProvider>
+      <AppContext.Provider
+        value={{
+          files,
+          addFile,
+          removeFile,
+          setFiles,
+          selectedFileId,
+          setSelectedFileId,
+          kbStatus,
+          setKbStatus,
+          testCases,
+          setTestCases,
+          selectedTestCase,
+          setSelectedTestCase,
+          generatedScript,
+          setGeneratedScript,
+        }}
+      >
+        {children}
+      </AppContext.Provider>
+    </SessionProvider>
   )
 }
 

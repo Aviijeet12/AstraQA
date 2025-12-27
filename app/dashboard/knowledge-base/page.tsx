@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useApp, type FileData } from "@/components/app-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,16 +10,153 @@ import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FileText, Upload, Trash2, CheckCircle2, Loader2, FileCode } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/hooks/use-toast"
 
 export default function KnowledgeBasePage() {
-  const { files, addFile, removeFile, kbStatus, setKbStatus } = useApp()
+  const { files, addFile, setFiles, removeFile, kbStatus, setKbStatus } = useApp()
   const [isDragging, setIsDragging] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [buildProgress, setBuildProgress] = useState(0)
   const [buildStep, setBuildStep] = useState<string>("")
+  const [kbUpdatedAt, setKbUpdatedAt] = useState<Date | null>(null)
+  const [lastBuild, setLastBuild] = useState<
+    | null
+    | {
+        id: string
+        status: string
+        startedAt: Date
+        completedAt: Date | null
+        processed: number
+        failed: number
+        error: string | null
+      }
+  >(null)
+  const [lastBuildSuccessRate, setLastBuildSuccessRate] = useState<number | null>(null)
   const { selectedFileId, setSelectedFileId } = useApp()
+  const { toast } = useToast()
+
+  const [previewTab, setPreviewTab] = useState<"preview" | "code">("preview")
+  const [filePreview, setFilePreview] = useState<string | null>(null)
+  const [previewMessage, setPreviewMessage] = useState<string | null>(null)
+
+  const formatTimeAgo = (date: Date) => {
+    const diffMs = Date.now() - date.getTime()
+    const diffMins = Math.max(0, Math.floor(diffMs / 60000))
+    if (diffMins < 60) return `${diffMins} min ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        const res = await fetch("/api/knowledge-base/state")
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+
+        const incomingFiles: FileData[] = (data.files || []).map((f: any) => ({
+          id: String(f.id),
+          name: String(f.name),
+          size: String(f.size),
+          type: String(f.type || "unknown"),
+          uploadDate: new Date(f.uploadedAt || Date.now()),
+        }))
+
+        setFiles(incomingFiles)
+        if (!selectedFileId && incomingFiles[0]) setSelectedFileId(incomingFiles[0].id)
+
+        const status = String(data.kbStatus || "empty")
+        if (status === "ready" || status === "building" || status === "empty") {
+          setKbStatus(status)
+        }
+
+        if (data.kbUpdatedAt) {
+          const d = new Date(data.kbUpdatedAt)
+          if (!Number.isNaN(d.getTime())) setKbUpdatedAt(d)
+        }
+
+        if (data.lastBuild && typeof data.lastBuild === "object") {
+          const started = new Date(data.lastBuild.startedAt)
+          const completed = data.lastBuild.completedAt ? new Date(data.lastBuild.completedAt) : null
+
+          setLastBuild({
+            id: String(data.lastBuild.id),
+            status: String(data.lastBuild.status || "unknown"),
+            startedAt: Number.isNaN(started.getTime()) ? new Date() : started,
+            completedAt: completed && !Number.isNaN(completed.getTime()) ? completed : null,
+            processed: Number(data.lastBuild.processed ?? 0),
+            failed: Number(data.lastBuild.failed ?? 0),
+            error: typeof data.lastBuild.error === "string" ? data.lastBuild.error : null,
+          })
+        } else {
+          setLastBuild(null)
+        }
+
+        setLastBuildSuccessRate(
+          typeof data.lastBuildSuccessRate === "number" ? data.lastBuildSuccessRate : null,
+        )
+      } catch {
+        // ignore
+      }
+    }
+
+    load()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selectedFile = files.find((f) => f.id === selectedFileId) || files[0] || null
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadPreview = async () => {
+      setFilePreview(null)
+      setPreviewMessage(null)
+
+      if (!selectedFile) return
+
+      try {
+        const res = await fetch(`/api/knowledge-base/files/${encodeURIComponent(selectedFile.id)}`)
+        if (!res.ok) {
+          setPreviewMessage(`Preview unavailable (${res.status})`)
+          return
+        }
+
+        const data = await res.json()
+        if (cancelled) return
+
+        if (typeof data?.preview === "string") {
+          setFilePreview(data.preview)
+          setPreviewMessage(null)
+          return
+        }
+
+        if (typeof data?.message === "string") {
+          setPreviewMessage(data.message)
+          return
+        }
+
+        setPreviewMessage("Preview is not available for this file.")
+      } catch {
+        if (cancelled) return
+        setPreviewMessage("Preview failed to load.")
+      }
+    }
+
+    loadPreview()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedFile?.id])
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -60,6 +197,22 @@ export default function KnowledgeBasePage() {
       })
 
       if (!res.ok) {
+        let message = `Upload failed (${res.status})`
+        try {
+          const err = await res.json()
+          if (typeof err?.error === "string") message = err.error
+          if (Array.isArray(err?.rejected) && err.rejected.length) {
+            message += `: ${err.rejected.join(", ")}`
+          }
+        } catch {
+          // ignore
+        }
+
+        toast({
+          title: "Upload failed",
+          description: message,
+          variant: "destructive",
+        })
         setUploadProgress(0)
         return
       }
@@ -78,6 +231,11 @@ export default function KnowledgeBasePage() {
       setUploadProgress(100)
       setTimeout(() => setUploadProgress(0), 400)
     } catch (e) {
+      toast({
+        title: "Upload failed",
+        description: "Network error while uploading. Please try again.",
+        variant: "destructive",
+      })
       setUploadProgress(0)
     }
   }
@@ -96,9 +254,53 @@ export default function KnowledgeBasePage() {
       const res = await fetch("/api/knowledge-base/build", { method: "POST" })
 
       if (!res.ok) {
+        let message = `Build failed (${res.status})`
+        try {
+          const err = await res.json()
+          if (typeof err?.error === "string") message = err.error
+          if (typeof err?.message === "string") message = err.message
+        } catch {
+          // ignore
+        }
+
+        toast({
+          title: "Build failed",
+          description: message,
+          variant: "destructive",
+        })
         setKbStatus("empty")
         setBuildProgress(0)
         setBuildStep("")
+
+        // Refresh state so the user can see latest run stats/errors.
+        try {
+          await fetch("/api/knowledge-base/state").then(async (r) => {
+            if (!r.ok) return
+            const d = await r.json()
+            if (d?.kbUpdatedAt) {
+              const dt = new Date(d.kbUpdatedAt)
+              if (!Number.isNaN(dt.getTime())) setKbUpdatedAt(dt)
+            }
+            if (d?.lastBuild && typeof d.lastBuild === "object") {
+              const started = new Date(d.lastBuild.startedAt)
+              const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null
+              setLastBuild({
+                id: String(d.lastBuild.id),
+                status: String(d.lastBuild.status || "unknown"),
+                startedAt: Number.isNaN(started.getTime()) ? new Date() : started,
+                completedAt: completed && !Number.isNaN(completed.getTime()) ? completed : null,
+                processed: Number(d.lastBuild.processed ?? 0),
+                failed: Number(d.lastBuild.failed ?? 0),
+                error: typeof d.lastBuild.error === "string" ? d.lastBuild.error : null,
+              })
+              setLastBuildSuccessRate(
+                typeof d.lastBuildSuccessRate === "number" ? d.lastBuildSuccessRate : null,
+              )
+            }
+          })
+        } catch {
+          // ignore
+        }
         return
       }
 
@@ -106,12 +308,61 @@ export default function KnowledgeBasePage() {
 
       setBuildStep(data.message || "Finalizing Knowledge Base...")
       setBuildProgress(100)
-      setKbStatus("ready")
+      setKbStatus(data.status === "ready" ? "ready" : "empty")
+      if (data.completedAt) {
+        const d = new Date(data.completedAt)
+        if (!Number.isNaN(d.getTime())) setKbUpdatedAt(d)
+      } else {
+        setKbUpdatedAt(new Date())
+      }
+
+      // Refresh state to show latest run summary.
+      try {
+        const s = await fetch("/api/knowledge-base/state")
+        if (s.ok) {
+          const d = await s.json()
+          if (d?.lastBuild && typeof d.lastBuild === "object") {
+            const started = new Date(d.lastBuild.startedAt)
+            const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null
+            setLastBuild({
+              id: String(d.lastBuild.id),
+              status: String(d.lastBuild.status || "unknown"),
+              startedAt: Number.isNaN(started.getTime()) ? new Date() : started,
+              completedAt: completed && !Number.isNaN(completed.getTime()) ? completed : null,
+              processed: Number(d.lastBuild.processed ?? 0),
+              failed: Number(d.lastBuild.failed ?? 0),
+              error: typeof d.lastBuild.error === "string" ? d.lastBuild.error : null,
+            })
+          } else {
+            setLastBuild(null)
+          }
+          setLastBuildSuccessRate(
+            typeof d.lastBuildSuccessRate === "number" ? d.lastBuildSuccessRate : null,
+          )
+        }
+      } catch {
+        // ignore
+      }
     } catch (e) {
+      toast({
+        title: "Build failed",
+        description: "Network error while building. Please try again.",
+        variant: "destructive",
+      })
       setKbStatus("empty")
       setBuildProgress(0)
       setBuildStep("")
     }
+  }
+
+  const handleDeleteFile = async (id: string) => {
+    try {
+      await fetch(`/api/knowledge-base/files/${encodeURIComponent(id)}`, { method: "DELETE" })
+    } catch {
+      // ignore
+    }
+    removeFile(id)
+    if (selectedFileId === id) setSelectedFileId(null)
   }
 
   return (
@@ -130,7 +381,8 @@ export default function KnowledgeBasePage() {
             <CardHeader>
               <CardTitle>Upload Documents</CardTitle>
               <CardDescription>
-                Drag and drop files here or click to browse. Supported formats: .md, .txt, .json, .pdf, .html
+                Drag and drop files here or click to browse. Supported formats: .md, .mdx, .txt, .json, .pdf, .html,
+                .csv, .yml, .yaml, .xml, .docx, and common code files.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -150,7 +402,7 @@ export default function KnowledgeBasePage() {
                   multiple
                   className="hidden"
                   onChange={handleFileInput}
-                  accept=".md,.txt,.json,.pdf,.html"
+                  accept=".md,.mdx,.txt,.json,.pdf,.html,.csv,.yml,.yaml,.xml,.docx,.js,.jsx,.ts,.tsx,.py,.java,.cs,.rb,.go,.php,.sql"
                 />
                 <div className="flex flex-col items-center gap-4">
                   <div className="p-4 rounded-full bg-primary/10 text-primary">
@@ -167,6 +419,36 @@ export default function KnowledgeBasePage() {
                   </div>
                 )}
               </div>
+
+              <div className="mt-6 rounded-lg border bg-muted/20 p-4 text-sm">
+                <p className="font-medium">What should you upload?</p>
+                <p className="mt-1 text-muted-foreground">
+                  Upload the docs that describe how your product works (flows, rules, APIs). The better the docs, the
+                  better the generated test cases and scripts.
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <p className="font-medium">High-value docs</p>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+                      <li>PRD / user stories / acceptance criteria</li>
+                      <li>API specs (OpenAPI/Swagger exported as JSON)</li>
+                      <li>Auth rules (roles, permissions, session rules)</li>
+                      <li>UI flows (happy path + edge cases)</li>
+                      <li>Error codes and validation rules</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-medium">Examples</p>
+                    <ul className="list-disc pl-5 text-muted-foreground space-y-1">
+                      <li>README / onboarding docs</li>
+                      <li>Sample request/response payloads</li>
+                      <li>Test data rules (formats, constraints)</li>
+                      <li>Release notes / change logs</li>
+                      <li>HTML exports of internal docs</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -178,10 +460,17 @@ export default function KnowledgeBasePage() {
               <CardContent>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {files.map((file) => (
-                    <button
+                    <div
                       key={file.id}
-                      type="button"
                       onClick={() => setSelectedFileId(file.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          setSelectedFileId(file.id)
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                       className={cn(
                         "flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors group w-full text-left",
                         selectedFileId === file.id && "border-primary bg-primary/5",
@@ -204,12 +493,12 @@ export default function KnowledgeBasePage() {
                         className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"
                         onClick={(e) => {
                           e.stopPropagation()
-                          removeFile(file.id)
+                          void handleDeleteFile(file.id)
                         }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </CardContent>
@@ -251,10 +540,40 @@ export default function KnowledgeBasePage() {
                       <CheckCircle2 className="h-8 w-8" />
                     </div>
                     <p className="font-medium text-green-500">Ready for Generation</p>
-                    <p className="text-sm text-muted-foreground">Last updated: Just now</p>
+                    <p className="text-sm text-muted-foreground">
+                      Last updated: {kbUpdatedAt ? formatTimeAgo(kbUpdatedAt) : "—"}
+                    </p>
                   </div>
                 )}
               </div>
+
+              {lastBuild && (
+                <div className="rounded-lg border bg-muted/20 p-4 text-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium">Latest build run</p>
+                    <p
+                      className={cn(
+                        "text-xs",
+                        lastBuild.status === "ready"
+                          ? "text-green-500"
+                          : lastBuild.status === "failed"
+                            ? "text-destructive"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {lastBuild.status}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">
+                    {lastBuildSuccessRate === null ? "—" : `${lastBuildSuccessRate}%`} success • {lastBuild.processed} processed • {lastBuild.failed} failed
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Started {formatTimeAgo(lastBuild.startedAt)}
+                    {lastBuild.completedAt ? ` • Completed ${formatTimeAgo(lastBuild.completedAt)}` : ""}
+                  </p>
+                  {lastBuild.error && <p className="mt-2 text-xs text-destructive">{lastBuild.error}</p>}
+                </div>
+              )}
 
               <div className="mt-auto">
                 <Button
@@ -277,7 +596,7 @@ export default function KnowledgeBasePage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">File Preview</CardTitle>
-                <Tabs defaultValue="preview" className="w-[120px]">
+                <Tabs value={previewTab} onValueChange={(v) => setPreviewTab(v as any)} className="w-[120px]">
                   <TabsList className="grid w-full grid-cols-2 h-8">
                     <TabsTrigger value="preview" className="text-xs">
                       View
@@ -298,9 +617,16 @@ export default function KnowledgeBasePage() {
                       {selectedFile.size} • {selectedFile.type.toUpperCase()} •{" "}
                       {selectedFile.uploadDate.toLocaleString()}
                     </p>
-                    <p className="mt-3 text-muted-foreground">
-                      File content preview is not implemented yet. This panel shows which file is currently selected.
-                    </p>
+                    <div className={cn("mt-3", previewTab === "code" ? "font-mono text-xs" : "text-muted-foreground")}
+                    >
+                      {previewMessage ? (
+                        <p>{previewMessage}</p>
+                      ) : filePreview ? (
+                        <pre className="whitespace-pre-wrap">{filePreview}</pre>
+                      ) : (
+                        <p className="text-muted-foreground">Loading preview…</p>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">

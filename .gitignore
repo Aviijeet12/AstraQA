@@ -7,3 +7,10 @@ node_modules
 pnpm-lock.yaml
 dist
 coverage
+
+# Local logs / build artifacts
+*.log
+tsconfig.tsbuildinfo
+
+# Local runtime uploads
+uploads/

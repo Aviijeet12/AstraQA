@@ -5,29 +5,37 @@ This is a Next.js (App Router) frontend for the AstraQA Engine: a QA automation 
 ## High-level Features
 
 - Landing page and marketing content
-- Auth UI (login/signup) – backend not yet implemented
-- Dashboard with stats and recent activity (currently mocked)
+- Auth (login/signup) with protected dashboard routes
+- Dashboard with real stats and recent activity (Prisma-backed)
 - Knowledge Base builder (file upload + "build" flow)
-- Test Case generator (LLM-backed API placeholder)
+- Test Case generator (RAG + LLM; requires `GEMINI_API_KEY`)
 - Selenium Script generator
 - Settings for LLM/vector DB and Selenium defaults
 
 ## Implemented Backend APIs (Next.js Route Handlers)
 
-All routes live under `app/api` and are currently stateless placeholders you can extend:
+All routes live under `app/api`.
 
 - `POST /api/knowledge-base/upload`
   - Expects `multipart/form-data` with one or more `files` fields.
   - Returns basic metadata for each file (id, name, size, type, uploadedAt).
 
 - `POST /api/knowledge-base/build`
-  - Simulates building the knowledge base (chunking, embeddings, vector store persistence).
-  - Returns `{ status: "ready", message, completedAt }`.
+  - Builds the knowledge base by parsing uploaded files and chunking content.
+  - Persists chunks to Postgres (`Chunk` table) and tracks jobs/status.
+  - If a vector DB + embeddings provider are configured, also indexes vectors for semantic retrieval.
+  - Returns `{ status, message, completedAt, processed }`.
+
+- `POST /api/knowledge-base/retrieve`
+  - Body: `{ "query": string, "topK"?: number }`.
+  - Returns `{ mode: "fts" | "qdrant", chunks: [{ id, fileId, score, text }] }`.
+  - Uses Postgres full-text search by default, and Qdrant vector similarity when configured.
 
 - `POST /api/tests/generate`
   - Body: `{ "prompt": string }`.
   - Returns `{ testCases: TestCase[] }` matching the shape used in `components/app-provider.tsx`.
-  - Currently returns deterministic sample cases; plug in your LLM + vector DB here.
+  - Uses Knowledge Base retrieval (FTS/Qdrant) + Gemini to generate KB-grounded test cases.
+  - If `GEMINI_API_KEY` is not set, returns a clear 400 error (placeholders are intentionally disabled).
 
 - `POST /api/scripts/generate`
   - Body: `{ testCase: TestCase }`.
@@ -35,7 +43,10 @@ All routes live under `app/api` and are currently stateless placeholders you can
 
 - `POST /api/config/save`
   - Body: `{ llmProvider?, vectorDb?, defaultBrowser?, implicitWaitSeconds?, headless? }`.
-  - Currently just echoes the payload back with `{ status: "ok" }`.
+  - Persists per-user settings in Postgres.
+
+- `POST /api/knowledge-base/reset`
+  - Deletes all uploaded files, chunks, build runs, generated test cases, and scripts for the current user.
 
 ## How the Frontend Uses These APIs
 
@@ -84,12 +95,15 @@ All routes live under `app/api` and are currently stateless placeholders you can
       - `auth/[...nextauth]/route.ts` – NextAuth credentials provider
       - `auth/signup/route.ts` – Signup endpoint
       - `auth/me/route.ts` – Returns current user
-      - `auth/logout/route.ts` – Placeholder logout endpoint
-      - `knowledge-base/upload/route.ts` – Uploads KB documents
-      - `knowledge-base/build/route.ts` – Triggers KB build (stubbed success)
-      - `tests/generate/route.ts` – Generates sample test cases
-      - `scripts/generate/route.ts` – Generates a sample Selenium-like script
-      - `config/save/route.ts` – Saves settings payload (echoes back)
+        - `auth/logout/route.ts` – Returns 410 (use NextAuth `signOut` client flow)
+        - `knowledge-base/upload/route.ts` – Uploads KB documents
+        - `knowledge-base/build/route.ts` – Builds KB chunks + tracks runs/jobs
+        - `knowledge-base/retrieve/route.ts` – Retrieves relevant KB chunks (FTS/Qdrant)
+        - `knowledge-base/reset/route.ts` – Deletes all KB data for the user
+        - `tests/generate/route.ts` – RAG + Gemini test-case generation
+        - `scripts/generate/route.ts` – RAG-aware Selenium script generator
+        - `config/save/route.ts` – Saves per-user settings
+        - `config/save/route.ts` – Saves per-user settings
 
   - `components/`
     - `app-provider.tsx` – Global app state (files, KB status, tests, scripts)
@@ -110,24 +124,22 @@ All routes live under `app/api` and are currently stateless placeholders you can
 
   ## Environment Setup
 
-  Create `.env.local` at the project root (already present in this repo locally) with at least:
+  Create `.env.local` at the project root by copying `.env.example`.
+
+  Minimum required variables:
 
   ```env
   DATABASE_URL="postgresql://user:pass@host:5432/dbname?sslmode=require"
-  SUPABASE_URL=https://xxxx.supabase.co
-  SUPABASE_KEY=eyJ...service_role...
-  SUPABASE_BUCKET=kb-files
-  HF_API_KEY=hf_xxx...
-  GCP_CLIENT_EMAIL=xxx@xxx.iam.gserviceaccount.com
-  GCP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-  GCP_PROJECT_ID=myproject-123
   NEXTAUTH_SECRET=a_generated_hex
-  AUTH_SECRET=a_generated_hex2
-  VECTOR_DB_PATH=./vector-db
   NODE_ENV=development
   ```
 
-  For local development you mainly need a valid `DATABASE_URL`. The other keys are future-facing for full KB/LLM integration.
+  Optional variables enable extra features:
+
+  - Qdrant vector search: `QDRANT_URL`, optional `QDRANT_API_KEY`, optional `VECTOR_COLLECTION_NAME`
+  - Embeddings: `OLLAMA_BASE_URL` (recommended) or `HF_API_KEY`
+  - LLM generation: `GEMINI_API_KEY`
+  - Supabase (planned): `SUPABASE_URL`, `SUPABASE_KEY`
 
   > **Note:** Never commit real secrets. `.env.local` is git-ignored.
 
@@ -225,9 +237,33 @@ All routes live under `app/api` and are currently stateless placeholders you can
     - Click a file to **select** it; the preview panel on the right shows its metadata (name, size, type, upload time).
   - The **Build Knowledge Base** button:
     - Calls `POST /api/knowledge-base/build`.
-    - Currently implemented as a **stub** that returns `status: "ready"` and a message.
+    - Parses and chunks all uploaded documents, stores chunks in Postgres.
+    - Optionally indexes vectors into Qdrant for semantic RAG retrieval.
     - Updates a visual progress bar + status indicator.
 
+  - RAG retrieval:
+    - `POST /api/knowledge-base/retrieve` returns top matching chunks.
+    - Test generation uses this retrieved context when available.
+
+  ### RAG / Vector DB (Optional)
+
+  You can run Qdrant locally using Docker Compose:
+
+  - `docker compose up -d`
+
+  Then set these env vars:
+
+  - `QDRANT_URL=http://127.0.0.1:6333`
+  - `VECTOR_COLLECTION_NAME=astraqa_kb` (optional)
+
+  You also need an embeddings provider:
+
+  - **Ollama (recommended local):**
+    - `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+    - `OLLAMA_EMBED_MODEL=nomic-embed-text` (optional)
+  - **HuggingFace (hosted):**
+    - `HF_API_KEY=...`
+    - `HF_EMBEDDINGS_MODEL=sentence-transformers/all-MiniLM-L6-v2` (optional)
   > **Planned:** Real KB ingestion (Supabase upload, parsing, chunking, embeddings, Chroma, worker-based builds).
 
   ### 2. Test Generator
@@ -236,18 +272,15 @@ All routes live under `app/api` and are currently stateless placeholders you can
 
   - You enter a natural language description of a flow or feature.
   - The page calls `POST /api/tests/generate` with `{ prompt }`.
-  - The API returns sample `TestCase[]` objects (positive & negative cases).
+  - The API returns KB-grounded `TestCase[]` objects (positive & negative cases) using RAG + Gemini.
   - These are stored in `AppProvider` and displayed in a list.
-
-  > **Planned:** Use KB context + LLM to generate realistic, system-aware test cases.
-
   ### 3. Script Generator
 
   **UI:** `app/dashboard/script-generator/page.tsx`
 
   - You select a test case from the list.
   - The page calls `POST /api/scripts/generate` with the selected test case.
-  - The API returns a sample Python Selenium script string.
+  - The API returns a Selenium script string derived from the selected test case (and can include KB context).
   - The script is shown in a code block and stored in global state for reuse.
 
   > **Planned:** Support multiple languages/frameworks and persist scripts in the DB.
@@ -259,9 +292,9 @@ All routes live under `app/api` and are currently stateless placeholders you can
   - Lets you configure:
     - Preferred browser (e.g., Chrome/Firefox)
     - Default timeout
-    - LLM provider and vector DB provider (placeholders)
+    - LLM provider and vector DB provider (UI selection; current generator routes use server env vars like `GEMINI_API_KEY`)
   - Posts to `POST /api/config/save`.
-  - Currently echoes the config back; DB persistence via the `Settings` model can be added easily.
+  - Persists user settings via Prisma (`UserSettings`).
 
   ---
 
@@ -271,9 +304,7 @@ All routes live under `app/api` and are currently stateless placeholders you can
   - `signup` (`app/api/auth/signup/route.ts`) creates a new user with a hashed password via Prisma.
   - `me` (`app/api/auth/me/route.ts`) returns the current user when a valid session exists.
 
-  > **Next steps:**
-  > - Wire the login/signup UI to these endpoints.
-  > - Protect dashboard routes to require authentication.
+  > **Note:** Dashboard routes are protected; login/signup UI uses NextAuth client flows.
 
   ---
 

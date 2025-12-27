@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { useApp } from "@/components/app-provider"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
@@ -25,28 +26,102 @@ export default function SettingsPage() {
   const { setKbStatus, setFiles, setTestCases, setGeneratedScript } = useApp()
   const { toast } = useToast()
 
+  const [llmProvider, setLlmProvider] = useState("gemini")
+  const [vectorDb, setVectorDb] = useState("faiss")
+  const [defaultBrowser, setDefaultBrowser] = useState("chrome")
+  const [implicitWaitSeconds, setImplicitWaitSeconds] = useState(10)
+  const [headless, setHeadless] = useState(false)
+  const [apiKey, setApiKey] = useState("")
+  const [useLocalEmbeddings, setUseLocalEmbeddings] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      // Local-only settings.
+      try {
+        const storedKey = localStorage.getItem("astraqa.apiKey")
+        if (storedKey) setApiKey(storedKey)
+        setUseLocalEmbeddings(localStorage.getItem("astraqa.useLocalEmbeddings") === "true")
+      } catch {
+        // ignore
+      }
+
+      try {
+        const res = await fetch("/api/config/me")
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+
+        const s = data.settings
+        if (!s) return
+
+        if (typeof s.llmProvider === "string") setLlmProvider(s.llmProvider)
+        if (typeof s.vectorDb === "string") setVectorDb(s.vectorDb)
+        if (typeof s.browser === "string") setDefaultBrowser(s.browser)
+        if (typeof s.implicitWaitSeconds === "number") setImplicitWaitSeconds(s.implicitWaitSeconds)
+        if (typeof s.headless === "boolean") setHeadless(s.headless)
+      } catch {
+        // ignore
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleResetKB = () => {
-    setKbStatus("empty")
-    setFiles([])
-    setTestCases([])
-    setGeneratedScript(null)
-    toast({
-      title: "Knowledge Base Reset",
-      description: "All uploaded files and generated data have been cleared.",
-      variant: "destructive",
-    })
+    const run = async () => {
+      try {
+        const res = await fetch("/api/knowledge-base/reset", { method: "POST" })
+        if (!res.ok) {
+          let message = `Reset failed (${res.status})`
+          try {
+            const err = await res.json()
+            if (typeof err?.message === "string") message = err.message
+            if (typeof err?.error === "string") message = err.error
+          } catch {
+            // ignore
+          }
+
+          toast({
+            title: "Reset failed",
+            description: message,
+            variant: "destructive",
+          })
+          return
+        }
+
+        setKbStatus("empty")
+        setFiles([])
+        setTestCases([])
+        setGeneratedScript(null)
+
+        toast({
+          title: "Knowledge Base Reset",
+          description: "All uploaded files, chunks, builds, and generated data have been deleted.",
+          variant: "destructive",
+        })
+      } catch {
+        toast({
+          title: "Reset failed",
+          description: "Network error while resetting your knowledge base.",
+          variant: "destructive",
+        })
+      }
+    }
+
+    run()
   }
 
   const handleSave = async () => {
-    const llmProvider = (document.getElementById("llm-provider") as HTMLSelectElement | null)?.value
-    const vectorDb = (document.getElementById("vector-db") as HTMLSelectElement | null)?.value
-    const defaultBrowser = (document.getElementById("browser") as HTMLSelectElement | null)?.value
-    const implicitWaitSeconds = Number(
-      (document.getElementById("timeout") as HTMLInputElement | null)?.value || "10",
-    )
+    let serverSaveOk = false
+    let serverSaveError: string | null = null
 
     try {
-      await fetch("/api/config/save", {
+      const res = await fetch("/api/config/save", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -56,10 +131,40 @@ export default function SettingsPage() {
           vectorDb,
           defaultBrowser,
           implicitWaitSeconds,
+          headless,
         }),
       })
+
+      if (!res.ok) {
+        serverSaveError = `Server save failed (${res.status})`
+        try {
+          const err = await res.json()
+          if (typeof err?.message === "string") serverSaveError = err.message
+          if (typeof err?.error === "string") serverSaveError = err.error
+        } catch {
+          // ignore
+        }
+      } else {
+        serverSaveOk = true
+      }
     } catch (e) {
-      // ignore network errors for now
+      serverSaveError = "Network error while saving server settings."
+    }
+
+    try {
+      localStorage.setItem("astraqa.apiKey", apiKey)
+      localStorage.setItem("astraqa.useLocalEmbeddings", String(useLocalEmbeddings))
+    } catch {
+      // ignore
+    }
+
+    if (!serverSaveOk) {
+      toast({
+        title: "Save failed",
+        description: serverSaveError ?? "Could not save settings to the server.",
+        variant: "destructive",
+      })
+      return
     }
 
     toast({
@@ -86,21 +191,25 @@ export default function SettingsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="llm-provider">LLM Provider</Label>
-                <Select defaultValue="openai">
+                <Select value={llmProvider} onValueChange={setLlmProvider}>
                   <SelectTrigger id="llm-provider">
                     <SelectValue placeholder="Select Provider" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="gemini">Google Gemini</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT-4)</SelectItem>
                     <SelectItem value="anthropic">Anthropic (Claude 3)</SelectItem>
                     <SelectItem value="local">Local LLM (Ollama)</SelectItem>
                     <SelectItem value="azure">Azure OpenAI</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Test generation defaults to Hugging Face using server env var <span className="font-mono">HF_API_KEY</span>. To use Gemini instead, set <span className="font-mono">GEMINI_API_KEY</span> or provide an API key.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="vector-db">Vector Database</Label>
-                <Select defaultValue="faiss">
+                <Select value={vectorDb} onValueChange={setVectorDb}>
                   <SelectTrigger id="vector-db">
                     <SelectValue placeholder="Select Database" />
                   </SelectTrigger>
@@ -111,14 +220,23 @@ export default function SettingsPage() {
                     <SelectItem value="pinecone">Pinecone</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Retrieval supports Postgres FTS by default and Qdrant when configured.
+                </p>
               </div>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="api-key">API Key</Label>
-              <Input id="api-key" type="password" placeholder="sk-..." />
+              <Input
+                id="api-key"
+                type="password"
+                placeholder="sk-..."
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
               <p className="text-xs text-muted-foreground">
-                Your API key is stored locally and never sent to our servers.
+                Stored locally for convenience. Test generation uses server env <span className="font-mono">HF_API_KEY</span> by default, and will switch to Gemini when <span className="font-mono">GEMINI_API_KEY</span> is set or you provide an API key.
               </p>
             </div>
 
@@ -129,7 +247,7 @@ export default function SettingsPage() {
                   Process documents locally without sending data to external APIs.
                 </p>
               </div>
-              <Switch />
+              <Switch checked={useLocalEmbeddings} onCheckedChange={setUseLocalEmbeddings} />
             </div>
           </CardContent>
         </Card>
@@ -144,7 +262,7 @@ export default function SettingsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="browser">Default Browser</Label>
-                <Select defaultValue="chrome">
+                <Select value={defaultBrowser} onValueChange={setDefaultBrowser}>
                   <SelectTrigger id="browser">
                     <SelectValue placeholder="Select Browser" />
                   </SelectTrigger>
@@ -158,7 +276,12 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="timeout">Implicit Wait Timeout (seconds)</Label>
-                <Input id="timeout" type="number" defaultValue="10" />
+                <Input
+                  id="timeout"
+                  type="number"
+                  value={implicitWaitSeconds}
+                  onChange={(e) => setImplicitWaitSeconds(Number(e.target.value || "0"))}
+                />
               </div>
             </div>
 
@@ -169,7 +292,7 @@ export default function SettingsPage() {
                   Generate scripts configured to run without a visible UI.
                 </p>
               </div>
-              <Switch />
+              <Switch checked={headless} onCheckedChange={setHeadless} />
             </div>
           </CardContent>
           <CardFooter className="border-t px-6 py-4">
@@ -206,7 +329,7 @@ export default function SettingsPage() {
                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                     <AlertDialogDescription>
                       This action cannot be undone. This will permanently delete your knowledge base and remove all
-                      uploaded data from the browser session.
+                      uploaded data from the server.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

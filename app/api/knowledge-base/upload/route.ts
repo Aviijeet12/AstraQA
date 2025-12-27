@@ -1,30 +1,116 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/require-user";
+import path from "path";
+import { promises as fs } from "fs";
+import { randomUUID } from "crypto";
 
-export const runtime = "nodejs"
+export const runtime = "nodejs";
+
+const sanitizeFilename = (name: string) => name.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 180);
+const allowedExt = new Set([
+  ".md",
+  ".mdx",
+  ".txt",
+  ".json",
+  ".pdf",
+  ".html",
+  ".csv",
+  ".yml",
+  ".yaml",
+  ".xml",
+  ".docx",
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".py",
+  ".java",
+  ".cs",
+  ".rb",
+  ".go",
+  ".php",
+  ".sql",
+]);
 
 export async function POST(req: Request) {
-  const contentType = req.headers.get("content-type") || ""
+  const { userId, response } = await requireUserId();
+  if (!userId) return response;
+
+  const contentType = req.headers.get("content-type") || "";
 
   if (!contentType.includes("multipart/form-data")) {
-    return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 })
+    return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
   }
 
-  const formData = await req.formData()
-  const files = formData.getAll("files")
+  const formData = await req.formData();
+  const uploads = formData.getAll("files").filter((f): f is File => f instanceof File);
 
-  if (!files.length) {
-    return NextResponse.json({ error: "No files provided" }, { status: 400 })
+  if (!uploads.length) {
+    return NextResponse.json({ error: "No files provided" }, { status: 400 });
   }
 
-  const storedFiles = files
-    .filter((f): f is File => f instanceof File)
-    .map((file) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: file.name,
-      size: file.size,
-      type: file.type || "application/octet-stream",
-      uploadedAt: new Date().toISOString(),
-    }))
+  const rejected = uploads
+    .map((f) => f.name)
+    .filter((name) => {
+      const ext = path.extname(name || "").toLowerCase();
+      return !allowedExt.has(ext);
+    });
 
-  return NextResponse.json({ files: storedFiles })
+  if (rejected.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Unsupported file type",
+        allowed: Array.from(allowedExt.values()),
+        rejected,
+      },
+      { status: 400 },
+    );
+  }
+
+  const baseDir = path.join(process.cwd(), "uploads", userId);
+  await fs.mkdir(baseDir, { recursive: true });
+
+  const created = [] as Array<{ id: string; name: string; size: number; type: string; uploadedAt: string }>;
+
+  for (const upload of uploads) {
+    const filename = sanitizeFilename(upload.name || "upload");
+    const ext = path.extname(filename);
+    const stem = path.basename(filename, ext);
+    const diskName = `${stem}-${randomUUID()}${ext}`;
+    const absPath = path.join(baseDir, diskName);
+    const relPath = path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+
+    const buf = Buffer.from(await upload.arrayBuffer());
+    await fs.writeFile(absPath, buf);
+
+    const row = await prisma.file.create({
+      data: {
+        userId,
+        filename,
+        size: buf.byteLength,
+        path: relPath,
+        mime: upload.type || "application/octet-stream",
+      },
+      select: { id: true, filename: true, size: true, mime: true, createdAt: true },
+    });
+
+    created.push({
+      id: row.id,
+      name: row.filename,
+      size: row.size,
+      type: row.mime,
+      uploadedAt: row.createdAt.toISOString(),
+    });
+  }
+
+  return NextResponse.json({
+    files: created.map((f) => ({
+      id: f.id,
+      name: f.name,
+      size: f.size,
+      type: f.type,
+      uploadedAt: f.uploadedAt,
+    })),
+  });
 }

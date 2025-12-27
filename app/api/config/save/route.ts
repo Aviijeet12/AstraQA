@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/require-user";
 
-export const runtime = "nodejs"
+export const runtime = "nodejs";
 
 type SettingsPayload = {
   llmProvider?: string
@@ -12,14 +14,36 @@ type SettingsPayload = {
 }
 
 export async function POST(req: Request) {
+  const { userId, response } = await requireUserId();
+  if (!userId) return response;
+
   const body = (await req.json().catch(() => ({}))) as SettingsPayload
 
-  // For now we just echo back a success response. In a real
-  // implementation you would persist this to a database or
-  // encrypted storage bound to the user.
-
-  return NextResponse.json({
-    status: "ok",
-    saved: body,
+  const saved = await prisma.userSettings.upsert({
+    where: { userId },
+    update: {
+      llmProvider: body.llmProvider,
+      vectorDb: body.vectorDb,
+      browser: body.defaultBrowser,
+      implicitWaitSeconds: typeof body.implicitWaitSeconds === "number" ? body.implicitWaitSeconds : null,
+      headless: typeof body.headless === "boolean" ? body.headless : null,
+    },
+    create: {
+      userId,
+      llmProvider: body.llmProvider,
+      vectorDb: body.vectorDb,
+      browser: body.defaultBrowser,
+      implicitWaitSeconds: typeof body.implicitWaitSeconds === "number" ? body.implicitWaitSeconds : null,
+      headless: typeof body.headless === "boolean" ? body.headless : null,
+    },
+    select: {
+      llmProvider: true,
+      vectorDb: true,
+      browser: true,
+      implicitWaitSeconds: true,
+      headless: true,
+    },
   })
+
+  return NextResponse.json({ status: "ok", settings: saved })
 }

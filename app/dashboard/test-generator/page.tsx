@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useApp, type TestCase } from "@/components/app-provider"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,17 +10,85 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Sparkles, CheckCircle2, AlertCircle, ArrowRight, Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
 
 export default function TestGeneratorPage() {
-  const { kbStatus, testCases, setTestCases, setSelectedTestCase } = useApp()
+  const { kbStatus, setKbStatus, testCases, setTestCases, setSelectedTestCase } = useApp()
   const [prompt, setPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
+  const [kbUpdatedAt, setKbUpdatedAt] = useState<Date | null>(null)
+  const [latestUploadAt, setLatestUploadAt] = useState<Date | null>(null)
   const router = useRouter()
+  const { toast } = useToast()
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadKb = async () => {
+      try {
+        const res = await fetch("/api/knowledge-base/state")
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+
+        const status = String(data.kbStatus || "empty")
+        if (status === "ready" || status === "building" || status === "empty") {
+          setKbStatus(status)
+        }
+
+        const updated = data.kbUpdatedAt ? new Date(data.kbUpdatedAt) : null
+        if (updated && !Number.isNaN(updated.getTime())) setKbUpdatedAt(updated)
+
+        const uploads: Date[] = (data.files || [])
+          .map((f: any) => new Date(f.uploadedAt))
+          .filter((d: Date) => !Number.isNaN(d.getTime()))
+
+        if (uploads.length > 0) {
+          uploads.sort((a, b) => b.getTime() - a.getTime())
+          setLatestUploadAt(uploads[0])
+        } else {
+          setLatestUploadAt(null)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    loadKb()
+
+    return () => {
+      cancelled = true
+    }
+  }, [setKbStatus])
+
+  const kbIsStale = useMemo(() => {
+    if (kbStatus !== "ready") return false
+    if (!kbUpdatedAt) return false
+    if (!latestUploadAt) return false
+    return latestUploadAt.getTime() > kbUpdatedAt.getTime() + 1000
+  }, [kbStatus, kbUpdatedAt, latestUploadAt])
+
+  const generationBlockedReason =
+    kbStatus === "building"
+      ? "Knowledge base is building. Please wait."
+      : kbStatus === "empty"
+        ? "Knowledge base is missing. Upload files and build it first."
+        : kbIsStale
+          ? "Knowledge base is stale. Rebuild to include the latest uploads."
+          : null
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return
+    if (generationBlockedReason) return
 
     setIsGenerating(true)
+
+    let apiKey: string | null = null
+    try {
+      apiKey = localStorage.getItem("astraqa.apiKey")
+    } catch {
+      apiKey = null
+    }
 
     try {
       const res = await fetch("/api/tests/generate", {
@@ -28,10 +96,24 @@ export default function TestGeneratorPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, apiKey: apiKey?.trim() || undefined }),
       })
 
       if (!res.ok) {
+        let message = `Generation failed (${res.status})`
+        try {
+          const err = await res.json()
+          if (typeof err?.message === "string") message = err.message
+          if (typeof err?.error === "string") message = err.error
+        } catch {
+          // ignore
+        }
+
+        toast({
+          title: "Test generation failed",
+          description: message,
+          variant: "destructive",
+        })
         setIsGenerating(false)
         return
       }
@@ -66,7 +148,25 @@ export default function TestGeneratorPage() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Knowledge Base Missing</AlertTitle>
           <AlertDescription>
-            You haven't built a knowledge base yet. The AI might lack context about your application.
+            Upload files and build your knowledge base first. Without it, results will be low-context.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {kbStatus === "building" && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Knowledge Base Building</AlertTitle>
+          <AlertDescription>Wait for the build to finish, then generate tests.</AlertDescription>
+        </Alert>
+      )}
+
+      {kbIsStale && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Knowledge Base Needs Rebuild</AlertTitle>
+          <AlertDescription>
+            New files were uploaded after the last build. Rebuild the knowledge base to include the latest changes.
           </AlertDescription>
         </Alert>
       )}
@@ -89,7 +189,7 @@ export default function TestGeneratorPage() {
               <Button
                 className="w-full h-12 text-lg shadow-lg shadow-primary/20"
                 onClick={handleGenerate}
-                disabled={isGenerating || !prompt.trim()}
+                disabled={isGenerating || !prompt.trim() || Boolean(generationBlockedReason)}
               >
                 {isGenerating ? (
                   <>
@@ -103,6 +203,10 @@ export default function TestGeneratorPage() {
                   </>
                 )}
               </Button>
+
+              {generationBlockedReason && (
+                <p className="text-xs text-muted-foreground">{generationBlockedReason}</p>
+              )}
             </CardContent>
           </Card>
         </div>

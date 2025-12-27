@@ -1,5 +1,6 @@
 "use client"
 
+import { signOut, useSession } from "next-auth/react"
 import { Bell, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +16,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ModeToggle } from "@/components/mode-toggle"
 
 export function DashboardHeader() {
+  const { data } = useSession()
+  const email = data?.user?.email || ""
+  const name = data?.user?.name || ""
+  const initials = (name || email || "QA")
+    .split(/\s|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join("")
+
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/80 px-6 backdrop-blur-md">
       <div className="w-full flex-1">
@@ -32,7 +43,6 @@ export function DashboardHeader() {
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-5 w-5" />
-          <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-primary"></span>
           <span className="sr-only">Notifications</span>
         </Button>
         <ModeToggle />
@@ -40,8 +50,8 @@ export function DashboardHeader() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="rounded-full">
               <Avatar className="h-8 w-8">
-                <AvatarImage src="/placeholder-user.jpg" alt="@user" />
-                <AvatarFallback>QA</AvatarFallback>
+                <AvatarImage alt={name || email || "user"} />
+                <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <span className="sr-only">Toggle user menu</span>
             </Button>
@@ -53,7 +63,7 @@ export function DashboardHeader() {
             <DropdownMenuItem>Settings</DropdownMenuItem>
             <DropdownMenuItem>Support</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Logout</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => signOut({ callbackUrl: "/login" })}>Logout</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

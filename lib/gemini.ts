@@ -1,9 +1,14 @@
-import { GEMINI_API_KEY } from "./env"
-
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-export async function callGemini(model: string, body: unknown) {
-  const url = `${GEMINI_API_URL}/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`
+export async function callGemini(model: string, body: unknown, apiKey?: string) {
+  const { GEMINI_API_KEY } = await import("./env")
+  const key = (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ?? GEMINI_API_KEY
+
+  if (!key) {
+    throw new Error("Missing Gemini API key (set GEMINI_API_KEY or provide apiKey)")
+  }
+
+  const url = `${GEMINI_API_URL}/${model}:generateContent?key=${encodeURIComponent(key)}`
 
   const res = await fetch(url, {
     method: "POST",

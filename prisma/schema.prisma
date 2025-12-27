@@ -11,12 +11,13 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String?
-  password  String
+  password  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // relations
   knowledgeBaseStatus KnowledgeBaseStatus?
+  knowledgeBaseBuilds KnowledgeBaseBuild[]
   testCases           TestCase[]
   scripts             Script[]
   settings            UserSettings?
@@ -24,11 +25,31 @@ model User {
 }
 
 model KnowledgeBaseStatus {
-  id        String   @id @default(cuid())
-  user      User     @relation(fields: [userId], references: [id])
-  userId    String   @unique
-  status    String
-  updatedAt DateTime @updatedAt
+  id          String              @id @default(cuid())
+  user        User                @relation(fields: [userId], references: [id])
+  userId      String              @unique
+  status      String
+  lastBuildId String?
+  lastBuild   KnowledgeBaseBuild? @relation(fields: [lastBuildId], references: [id])
+  updatedAt   DateTime            @updatedAt
+}
+
+model KnowledgeBaseBuild {
+  id          String    @id @default(cuid())
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  status      String    @default("building") // building, ready, failed
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  processed   Int       @default(0)
+  failed      Int       @default(0)
+  error       String?   @db.Text
+
+  jobs KnowledgeBaseJob[]
+
+  lastStatus KnowledgeBaseStatus[]
+
+  @@index([userId, startedAt])
 }
 
 model File {
@@ -36,6 +57,7 @@ model File {
   user             User?              @relation(fields: [userId], references: [id])
   userId           String?
   filename         String
+  size             Int                @default(0)
   path             String
   mime             String
   createdAt        DateTime           @default(now())
@@ -61,28 +83,37 @@ model Script {
   user       User     @relation(fields: [userId], references: [id])
   userId     String
   testCaseId String
+  language   String   @default("python")
   code       String   @db.Text
   createdAt  DateTime @default(now())
 }
 
 model UserSettings {
-  id      String  @id @default(cuid())
-  user    User    @relation(fields: [userId], references: [id])
-  userId  String  @unique
-  theme   String?
-  browser String?
+  id                  String   @id @default(cuid())
+  user                User     @relation(fields: [userId], references: [id])
+  userId              String   @unique
+  theme               String?
+  browser             String?
+  llmProvider         String?
+  vectorDb            String?
+  implicitWaitSeconds Int?
+  headless            Boolean?
 }
 
 model KnowledgeBaseJob {
-  id        String   @id @default(cuid())
+  id        String              @id @default(cuid())
   userId    String?
+  buildId   String?
   fileId    String
-  status    String   @default("pending") // pending, processing, done, failed
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  attempt   Int      @default(0)
-  error     String?  @db.Text
-  File      File     @relation(fields: [fileId], references: [id])
+  status    String              @default("pending") // pending, processing, done, failed
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  attempt   Int                 @default(0)
+  error     String?             @db.Text
+  File      File                @relation(fields: [fileId], references: [id])
+  build     KnowledgeBaseBuild? @relation(fields: [buildId], references: [id])
+
+  @@index([userId, buildId, createdAt])
 }
 
 model Chunk {

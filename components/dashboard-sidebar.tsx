@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Bot, LayoutDashboard, Upload, FileText, Code2, Settings, LogOut } from "lucide-react"
+import { signOut } from "next-auth/react"
 
 const sidebarItems = [
   {
@@ -66,7 +67,11 @@ export function DashboardSidebar() {
         </nav>
       </ScrollArea>
       <div className="border-t p-4">
-        <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+          onClick={() => signOut({ callbackUrl: "/login" })}
+        >
           <LogOut className="mr-2 h-4 w-4" />
           Log out
         </Button>
