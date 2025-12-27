@@ -16,7 +16,7 @@ export async function callAnthropic(model: string, body: unknown, apiKey?: strin
       "x-api-key": key,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({ model, ...body }),
+    body: JSON.stringify({ model, ...(body || {}) }),
   })
 
   if (!res.ok) {
