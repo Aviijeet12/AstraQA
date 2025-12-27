@@ -13,6 +13,8 @@ export const NEXTAUTH_SECRET = required("NEXTAUTH_SECRET", process.env.NEXTAUTH_
 
 // Optional integrations (enable when configured)
 export const GEMINI_API_KEY = optional(process.env.GEMINI_API_KEY)
+export const ANTHROPIC_API_KEY = optional(process.env.ANTHROPIC_API_KEY)
+export const ANTHROPIC_MODEL = optional(process.env.ANTHROPIC_MODEL)
 export const HF_API_KEY = optional(process.env.HF_API_KEY)
 export const SUPABASE_URL = optional(process.env.SUPABASE_URL)
 export const SUPABASE_KEY = optional(process.env.SUPABASE_KEY)

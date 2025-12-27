@@ -198,7 +198,7 @@ export default function SettingsPage() {
                   <SelectContent>
                     <SelectItem value="gemini">Google Gemini</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT-4)</SelectItem>
-                    <SelectItem value="anthropic">Anthropic (Claude 3)</SelectItem>
+                    <SelectItem value="anthropic">Anthropic (Claude Haiku 4.5)</SelectItem>
                     <SelectItem value="local">Local LLM (Ollama)</SelectItem>
                     <SelectItem value="azure">Azure OpenAI</SelectItem>
                   </SelectContent>

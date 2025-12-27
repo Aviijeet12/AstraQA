@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { retrieveChunks } from "@/lib/rag";
-import { GEMINI_API_KEY, HF_API_KEY } from "@/lib/env";
+import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL, GEMINI_API_KEY, HF_API_KEY } from "@/lib/env";
 import { callGemini } from "@/lib/gemini";
+import { callAnthropic } from "@/lib/anthropic";
 import { callHuggingFace } from "@/lib/hf";
 
 export const runtime = "nodejs";
@@ -80,6 +81,11 @@ export async function POST(req: Request) {
   const { userId, response } = await requireUserId();
   if (!userId) return response;
 
+  const userSettings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { llmProvider: true },
+  })
+
   const { prompt, count, apiKey } = (await req.json().catch(() => ({ prompt: "" }))) as {
     prompt?: unknown;
     count?: unknown;
@@ -108,12 +114,31 @@ export async function POST(req: Request) {
 
   const requestApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
   const effectiveGeminiKey = GEMINI_API_KEY || requestApiKey;
+  const effectiveAnthropicKey = ANTHROPIC_API_KEY || requestApiKey;
 
   // Default behavior:
-  // - If Gemini is configured (env or per-request key), use Gemini.
+  // - Respect saved provider when possible.
+  // - Otherwise: if Gemini is configured (env or per-request key), use Gemini.
   // - Otherwise, fall back to Hugging Face (HF_API_KEY from env).
-  const llmMode: "gemini" | "huggingface" | "none" =
-    effectiveGeminiKey ? "gemini" : HF_API_KEY ? "huggingface" : "none";
+  const preferred = userSettings?.llmProvider
+  const canAnthropic = Boolean(effectiveAnthropicKey)
+  const canGemini = Boolean(effectiveGeminiKey)
+  const canHuggingFace = Boolean(HF_API_KEY)
+
+  const llmMode: "anthropic" | "gemini" | "huggingface" | "none" =
+    preferred === "anthropic" && canAnthropic
+      ? "anthropic"
+      : preferred === "gemini" && canGemini
+        ? "gemini"
+        : preferred === "openai"
+          ? "none"
+          : canGemini
+            ? "gemini"
+            : canAnthropic
+              ? "anthropic"
+              : canHuggingFace
+                ? "huggingface"
+                : "none";
 
   // Gemini tends to be reliable with JSON; keep it strict.
   // HF may occasionally under-produce; accept partial-but-valid results.
@@ -140,6 +165,38 @@ export async function POST(req: Request) {
     "Return ONLY valid JSON: an array. No markdown, no commentary.";
 
   const runLLM = async (userText: string) => {
+    if (llmMode === "anthropic") {
+      const model = ANTHROPIC_MODEL || "claude-3-5-haiku-latest"
+      const resp = await callAnthropic(
+        model,
+        {
+          max_tokens: 2400,
+          temperature: 0.2,
+          messages: [
+            {
+              role: "user",
+              content:
+                instruction +
+                `\n\nUser prompt:\n${userText}` +
+                `\n\nKnowledge Base Context (top matches):\n${context || "(no matches found)"}`,
+            },
+          ],
+        },
+        effectiveAnthropicKey,
+      )
+
+      const blocks = (resp as any)?.content
+      if (Array.isArray(blocks)) {
+        return blocks
+          .map((b: any) => (typeof b?.text === "string" ? b.text : ""))
+          .filter(Boolean)
+          .join("\n")
+      }
+
+      const text = (resp as any)?.content?.[0]?.text
+      return typeof text === "string" ? text : JSON.stringify(resp)
+    }
+
     if (llmMode === "gemini") {
       const resp = await callGemini(
         "gemini-1.5-pro",
