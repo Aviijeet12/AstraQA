@@ -28,7 +28,7 @@ export default async function DashboardPage() {
   let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
   let done = 0, failed = 0, total = 0, successRate = null;
   if (userId) {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const weekAgo: Date = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
       prisma.file.count({ where: { userId } }),
       prisma.testCase.count({ where: { userId, createdAt: { gte: weekAgo } } }),
