@@ -2,10 +2,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FileText, PlayCircle, CheckCircle2, ArrowRight, Upload, Code2 } from "lucide-react"
 import Link from "next/link"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/nextauth"
-import { prisma } from "@/lib/prisma"
-
 const formatTimeAgo = (date: Date) => {
   const diffMs = Date.now() - date.getTime()
   const diffMins = Math.max(0, Math.floor(diffMs / 60000))
@@ -16,9 +12,17 @@ const formatTimeAgo = (date: Date) => {
   return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
 }
 
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "@/lib/nextauth"
+import { prisma } from "@/lib/prisma"
+
 export default async function DashboardPage() {
-  const session = await getServerSession(authOptions)
-  const userId = (session?.user as any)?.id as string | undefined
+  let session = null
+  let userId = undefined
+  try {
+    session = await getServerSession(authOptions)
+    userId = (session?.user as any)?.id as string | undefined
+  } catch {}
 
   let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null, recentTests = [], recentScripts = [], recent = [], done = 0, failed = 0, total = 0, successRate = null;
   if (userId) {
