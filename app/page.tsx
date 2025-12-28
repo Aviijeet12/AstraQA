@@ -29,18 +29,12 @@ export default function LandingPage() {
             </Link>
           </nav>
           <div className="flex items-center gap-4">
-            <Link
-              href="/login"
-              className="text-sm font-medium text-muted-foreground hover:text-primary hidden sm:block"
-            >
-              Log in
-            </Link>
-            <AuthLink href="/dashboard">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
-                Get Started
-                <ArrowRight className="ml-2 h-4 w-4" />
+            <Link href="/login">
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 hidden sm:inline-flex items-center gap-2 h-10 px-4 rounded-md">
+                Login
+                
               </Button>
-            </AuthLink>
+            </Link>
           </div>
         </div>
       </header>
