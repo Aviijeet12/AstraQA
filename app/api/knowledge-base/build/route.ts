@@ -88,10 +88,10 @@ try {
       ? items.map((it) => (typeof it?.str === 'string' ? it.str : '')).filter(Boolean).join(' ')
       : '';
     out += pageText + '\n';
-  }
-  await fs.writeFile(outPath, out, 'utf8');
-} finally {
-  try { await doc.destroy(); } catch {}
+    import { promises as fs } from 'node:fs';
+    import path from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    import { createRequire } from 'node:module';
 }
 `;
 
@@ -189,6 +189,18 @@ export async function POST() {
     });
     return NextResponse.json({ status: "empty", message: "No files uploaded" }, { status: 400 });
   }
+    async function extractPdfTextViaPdfParse(absPath: string) {
+      const buf = await fs.readFile(absPath);
+      try {
+        const mod = await import('pdf-parse');
+        const parser = (mod && (mod as any).default) ? (mod as any).default : mod;
+        const data = await parser(buf);
+        return (data && data.text) ? String(data.text) : '';
+      } catch (err) {
+        console.error('pdf-parse failed:', err);
+        throw err;
+      }
+    }
 
   const build = await (prisma as any).knowledgeBaseBuild.create({
     data: {
@@ -217,7 +229,7 @@ export async function POST() {
       select: { id: true },
     });
 
-    try {
+        return await extractPdfTextViaPdfParse(absPath);
       const relOrAbsPath = (file.path || "").replace(/\\/g, path.sep);
       const absPath = path.isAbsolute(relOrAbsPath) ? relOrAbsPath : path.join(process.cwd(), relOrAbsPath);
       let text = "";
