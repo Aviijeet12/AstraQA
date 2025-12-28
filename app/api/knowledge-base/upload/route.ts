@@ -81,11 +81,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // Use /tmp for uploads in production/serverless (Vercel), process.cwd() in dev
-  const baseDir =
-    process.env.NODE_ENV === "production"
-      ? path.join("/tmp", "uploads", userId)
-      : path.join(process.cwd(), "uploads", userId);
+  // Always use /tmp for uploads in production/serverless (Vercel), process.cwd() in dev
+  const isServerless = !!process.env.VERCEL || process.env.NODE_ENV === "production";
+  const baseDir = isServerless
+    ? path.join("/tmp", "uploads", userId)
+    : path.join(process.cwd(), "uploads", userId);
   await fs.mkdir(baseDir, { recursive: true });
 
   const created = [] as Array<{ id: string; name: string; size: number; type: string; uploadedAt: string }>;
