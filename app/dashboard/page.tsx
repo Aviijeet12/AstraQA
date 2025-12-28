@@ -70,7 +70,7 @@ export default async function DashboardPage() {
         href: "/dashboard/script-generator",
         createdAt: s.createdAt,
       })),
-    ]
+        let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, 6)
   }
