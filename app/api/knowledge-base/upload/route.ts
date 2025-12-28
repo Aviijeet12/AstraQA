@@ -34,8 +34,21 @@ const allowedExt = new Set([
 ]);
 
 export async function POST(req: Request) {
+
   const { userId, response } = await requireUserId();
   if (!userId) return response;
+
+  // Ensure the user exists in the database, or create a test user for development
+  let user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        id: userId,
+        email: `${userId}@test.dev`,
+        name: "Test User"
+      }
+    });
+  }
 
   const contentType = req.headers.get("content-type") || "";
 
