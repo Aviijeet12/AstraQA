@@ -20,61 +20,56 @@ export default async function DashboardPage() {
   const session = await getServerSession(authOptions)
   const userId = (session?.user as any)?.id as string | undefined
 
-  if (!userId) {
-    // Middleware should prevent this, but keep a safe fallback.
-    return null
+  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null, recentTests = [], recentScripts = [], recent = [], done = 0, failed = 0, total = 0, successRate = null;
+  if (userId) {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
+      prisma.file.count({ where: { userId } }),
+      prisma.testCase.count({ where: { userId, createdAt: { gte: weekAgo } } }),
+      prisma.script.count({ where: { userId } }),
+      prisma.knowledgeBaseBuild.findFirst({
+        where: { userId },
+        orderBy: { startedAt: "desc" },
+        select: { processed: true, failed: true },
+      }),
+      prisma.testCase.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, testId: true, scenario: true, createdAt: true },
+      }),
+      prisma.script.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: { id: true, testCaseId: true, createdAt: true },
+      }),
+    ])
+    done = latestKbBuild?.processed ?? 0
+    failed = latestKbBuild?.failed ?? 0
+    total = done + failed
+    successRate = total > 0 ? Math.round((done / total) * 100) : null
+    recent = [
+      ...recentTests.map((t) => ({
+        kind: "test" as const,
+        key: `test-${t.id}`,
+        title: t.scenario,
+        subtitle: `${t.testId} • ${formatTimeAgo(t.createdAt)}`,
+        href: "/dashboard/test-generator",
+        createdAt: t.createdAt,
+      })),
+      ...recentScripts.map((s) => ({
+        kind: "script" as const,
+        key: `script-${s.id}`,
+        title: "Selenium script generated",
+        subtitle: `${formatTimeAgo(s.createdAt)}`,
+        href: "/dashboard/script-generator",
+        createdAt: s.createdAt,
+      })),
+    ]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 6)
   }
-
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-  const [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
-    prisma.file.count({ where: { userId } }),
-    prisma.testCase.count({ where: { userId, createdAt: { gte: weekAgo } } }),
-    prisma.script.count({ where: { userId } }),
-    prisma.knowledgeBaseBuild.findFirst({
-      where: { userId },
-      orderBy: { startedAt: "desc" },
-      select: { processed: true, failed: true },
-    }),
-    prisma.testCase.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-      select: { id: true, testId: true, scenario: true, createdAt: true },
-    }),
-    prisma.script.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-      select: { id: true, testCaseId: true, createdAt: true },
-    }),
-  ])
-
-  const done = latestKbBuild?.processed ?? 0
-  const failed = latestKbBuild?.failed ?? 0
-  const total = done + failed
-  const successRate = total > 0 ? Math.round((done / total) * 100) : null
-
-  const recent = [
-    ...recentTests.map((t) => ({
-      kind: "test" as const,
-      key: `test-${t.id}`,
-      title: t.scenario,
-      subtitle: `${t.testId} • ${formatTimeAgo(t.createdAt)}`,
-      href: "/dashboard/test-generator",
-      createdAt: t.createdAt,
-    })),
-    ...recentScripts.map((s) => ({
-      kind: "script" as const,
-      key: `script-${s.id}`,
-      title: "Selenium script generated",
-      subtitle: `${formatTimeAgo(s.createdAt)}`,
-      href: "/dashboard/script-generator",
-      createdAt: s.createdAt,
-    })),
-  ]
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 6)
 
   return (
     <div className="flex flex-col gap-6 p-6">
