@@ -2,6 +2,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FileText, PlayCircle, CheckCircle2, ArrowRight, Upload, Code2 } from "lucide-react"
 import Link from "next/link"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "@/lib/nextauth"
+import LoginClient from "../login/login-client"
 const formatTimeAgo = (date: Date) => {
   const diffMs = Date.now() - date.getTime()
   const diffMins = Math.max(0, Math.floor(diffMs / 60000))
@@ -77,7 +80,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 p-6 relative">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -208,6 +211,18 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      {/* Overlay sign-in prompt for unauthenticated users */}
+      {!userId && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="max-w-md w-full">
+            <div className="mb-6 text-center">
+              <h2 className="text-2xl font-bold">Sign in to use AstraQA</h2>
+              <p className="text-muted-foreground mt-2">Sign in to generate test cases, scripts, and upload docs.</p>
+            </div>
+            <LoginClient callbackUrl="/dashboard" />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
