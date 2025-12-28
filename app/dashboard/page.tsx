@@ -24,7 +24,7 @@ export default async function DashboardPage() {
     userId = (session?.user as any)?.id as string | undefined
   } catch {}
 
-  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null, recentTests = [], recentScripts = [], recent = [], done = 0, failed = 0, total = 0, successRate = null;
+  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null, recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [], done = 0, failed = 0, total = 0, successRate = null;
   if (userId) {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
