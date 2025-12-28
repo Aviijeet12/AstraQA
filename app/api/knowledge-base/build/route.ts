@@ -179,7 +179,18 @@ export async function POST() {
     try {
       const relOrAbsPath = (file.path || "").replace(/\\/g, path.sep);
       const absPath = path.isAbsolute(relOrAbsPath) ? relOrAbsPath : path.join(process.cwd(), relOrAbsPath);
-      const text = await readTextFromFile(absPath, file.mime || "");
+      let text = "";
+      try {
+        text = await readTextFromFile(absPath, file.mime || "");
+      } catch (err) {
+        console.error(`Error reading file for KB build:`, {
+          fileId: file.id,
+          absPath,
+          mime: file.mime,
+          error: err instanceof Error ? err.message : err
+        });
+        throw err;
+      }
       const chunks = splitTextIntoChunks(text).filter((c) => c.trim().length > 0);
 
       const chunkRows = chunks.map((t, idx) => {
@@ -205,12 +216,14 @@ export async function POST() {
           userId,
           chunks: chunkRows.map((c) => ({ id: c.id, fileId: c.fileId, text: c.text })),
         });
-      } catch {
+      } catch (err) {
+        console.error(`Error indexing chunks in Qdrant:`, err);
         // Ignore vector indexing failures; DB chunks are still usable via FTS retrieval.
       }
 
       processed += 1;
     } catch (e) {
+      console.error(`KB build failed for file`, file.id, e);
       failed += 1;
       await prisma.knowledgeBaseJob.update({
         where: { id: job.id },

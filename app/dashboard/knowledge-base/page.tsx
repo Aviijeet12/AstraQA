@@ -44,6 +44,42 @@ export default function KnowledgeBasePage() {
   const { data: session, status } = useSession();
   const isLoggedIn = !!session?.user?.id;
 
+  // Debug: fetch current KB state on mount to ensure server session is visible
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        console.log('[KB PAGE] fetching /api/knowledge-base/state');
+        const res = await fetch('/api/knowledge-base/state');
+        console.log('[KB PAGE] state response status', res.status);
+        const data = await res.json().catch(() => ({}));
+        console.log('[KB PAGE] state data', data);
+        if (!mounted) return;
+        if (res.ok && data.files) {
+          setFiles(
+            (data.files || []).map((file: any) => ({
+              id: file.id,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              uploadDate: new Date(file.uploadedAt || Date.now()),
+            })),
+          );
+          setKbStatus((data.kbStatus as any) || 'empty');
+          if (data.kbUpdatedAt) {
+            const dt = new Date(data.kbUpdatedAt);
+            if (!Number.isNaN(dt.getTime())) setKbUpdatedAt(dt);
+          }
+        }
+      } catch (e) {
+        console.log('[KB PAGE] state fetch error', e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   // Add missing state for file preview and selection
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const selectedFile = files.find((f: FileData) => f.id === selectedFileId) || null;
@@ -121,11 +157,20 @@ export default function KnowledgeBasePage() {
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ...all logic and handlers above...
+    const files = Array.from(e.target.files || []);
+    handleFiles(files);
   };
 
   const handleFiles = async (fileList: File[]) => {
     if (!fileList.length) return;
+    if (!isLoggedIn) {
+      toast({
+        title: "Login required",
+        description: "You must be logged in to upload files.",
+        variant: "destructive",
+      });
+      return;
+    }
     const formData = new FormData();
     fileList.forEach((file) => formData.append("files", file));
     setUploadProgress(10);
@@ -134,40 +179,60 @@ export default function KnowledgeBasePage() {
         method: "POST",
         body: formData,
       });
+      if (res.status === 401) {
+        toast({
+          title: "Unauthorized",
+          description: "Session expired or not logged in. Please log in again.",
+          variant: "destructive",
+        });
+        setUploadProgress(0);
+        return;
+      }
       if (!res.ok) {
         let message = `Upload failed (${res.status})`;
+        let details = "";
         try {
           const err = await res.json();
           if (typeof err?.error === "string") message = err.error;
           if (Array.isArray(err?.rejected) && err.rejected.length) {
             message += `: ${err.rejected.join(", ")}`;
           }
+          details = JSON.stringify(err);
         } catch (e) {
-          // ignore
+          details = String(e);
         }
         toast({
           title: "Upload failed",
-          description: message,
+          description: message + (details ? `\nDetails: ${details}` : ""),
           variant: "destructive",
         });
         setUploadProgress(0);
         return;
       }
-      const data = await res.json();
-      const uploaded: FileData[] = (data.files || []).map((file: any) => ({
-        id: file.id,
-        name: file.name,
-        size: (file.size / 1024).toFixed(2) + " KB",
-        type: file.type?.split("/").pop() || "unknown",
-        uploadDate: new Date(file.uploadedAt || Date.now()),
-      }));
-      uploaded.forEach((f) => addFile(f));
+      // Refresh file list from server after upload
+      try {
+        const stateRes = await fetch("/api/knowledge-base/state");
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          setFiles(
+            (stateData.files || []).map((file: any) => ({
+              id: file.id,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              uploadDate: new Date(file.uploadedAt || Date.now()),
+            }))
+          );
+        }
+      } catch (e) {
+        // ignore
+      }
       setUploadProgress(100);
       setTimeout(() => setUploadProgress(0), 400);
     } catch (e) {
       toast({
         title: "Upload failed",
-        description: "Network error while uploading. Please try again.",
+        description: `Network error while uploading. ${e instanceof Error ? e.message : String(e)}`,
         variant: "destructive",
       });
       setUploadProgress(0);

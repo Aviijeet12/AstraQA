@@ -1,3 +1,6 @@
+"use client"
+
+import React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FileText, PlayCircle, CheckCircle2, ArrowRight, Upload, Code2 } from "lucide-react";
@@ -15,9 +18,50 @@ const formatTimeAgo = (date: Date) => {
 
 export default function DashboardPage() {
   // Public dashboard. No authentication required. Protected actions should handle auth separately.
-  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null;
-  let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
-  let done = 0, failed = 0, total = 0, successRate = null;
+  const [filesCount, setFilesCount] = React.useState<number>(0);
+  const [testCasesWeek, setTestCasesWeek] = React.useState<number>(0);
+  const [scriptsCount, setScriptsCount] = React.useState<number>(0);
+  const [latestKbBuild, setLatestKbBuild] = React.useState<any | null>(null);
+  const [recentTests, setRecentTests] = React.useState<any[]>([]);
+  const [recentScripts, setRecentScripts] = React.useState<any[]>([]);
+  const [recent, setRecent] = React.useState<any[]>([]);
+  const [done, setDone] = React.useState<number>(0);
+  const [failed, setFailed] = React.useState<number>(0);
+  const [total, setTotal] = React.useState<number>(0);
+  const [successRate, setSuccessRate] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/dashboard/state');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        setFilesCount(Number(data.filesCount || 0));
+        setScriptsCount(Number(data.scriptsCount || 0));
+        setTestCasesWeek(Number(data.testCasesWeek || 0));
+        setLatestKbBuild(data.lastBuild ?? null);
+        setSuccessRate(data.lastBuildSuccessRate ?? null);
+        setRecentTests(data.recentTests || []);
+        setRecentScripts(data.recentScripts || []);
+        // build recent combined list
+        const combined: any[] = [];
+        (data.recentTests || []).forEach((t: any) =>
+          combined.push({ key: `test-${t.id}`, kind: 'test', title: t.feature, subtitle: 'Test case', href: `/dashboard/test-generator` }),
+        );
+        (data.recentScripts || []).forEach((s: any) =>
+          combined.push({ key: `script-${s.id}`, kind: 'script', title: s.language || 'Script', subtitle: 'Generated script', href: `/dashboard/script-generator` }),
+        );
+        setRecent(combined.slice(0, 6));
+      } catch (e) {
+        console.error('[DASHBOARD] fetch state error', e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-6 p-6 relative">

@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import AuthLink from "@/components/auth-link"
 import { ArrowRight, Bot, Upload, FileText, Code2, PlayCircle, CheckCircle2 } from "lucide-react"
 
 export default function HowItWorksPage() {
@@ -34,12 +35,12 @@ export default function HowItWorksPage() {
             >
               Log in
             </Link>
-            <Link href="/dashboard">
+            <AuthLink href="/dashboard">
               <Button className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
                 Get Started
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
-            </Link>
+            </AuthLink>
           </div>
         </div>
       </header>
@@ -183,12 +184,12 @@ export default function HowItWorksPage() {
           </div>
 
           <div className="mt-24 text-center">
-            <Link href="/dashboard">
+            <AuthLink href="/dashboard">
               <Button size="lg" className="h-12 px-8 text-base">
                 Start Your First Test
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
-            </Link>
+            </AuthLink>
           </div>
         </div>
       </main>
