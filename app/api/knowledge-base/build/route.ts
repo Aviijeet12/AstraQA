@@ -7,6 +7,17 @@ import { indexChunksInQdrant } from "@/lib/rag";
 import os from "os";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
+import { createRequire } from 'module';
+
+// Hint to bundlers/packagers: attempt to resolve known pdfjs entry so the dependency
+// is included in serverless deployments even when referenced dynamically inside
+// an evaluated child script. This is safe because resolution failures are caught.
+try {
+  const _req = createRequire(import.meta.url);
+  _req.resolve('pdfjs-dist/legacy/build/pdf.mjs');
+} catch (_) {
+  // ignore; this only helps the packager include pdfjs-dist when possible
+}
 
 export const runtime = "nodejs";
 
@@ -29,11 +40,41 @@ if (!inPath || !outPath) throw new Error('Missing args');
 const buf = await fs.readFile(inPath);
 const data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 
-const entry = require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
-const pdfjs = await import(pathToFileURL(entry).href);
+let pdfjs;
+// Try several candidate entry points for pdfjs-dist — different installs/package layouts
+const candidates = [
+  'pdfjs-dist/legacy/build/pdf.mjs',
+  'pdfjs-dist/legacy/build/pdf.js',
+  'pdfjs-dist/build/pdf.mjs',
+  'pdfjs-dist/build/pdf.js',
+  'pdfjs-dist'
+];
+let entry;
+for (const c of candidates) {
+  try {
+    entry = require.resolve(c);
+    break;
+  } catch (_) {
+    // try next
+  }
+}
+if (!entry) {
+  // Fallback to dynamic import of package name — may work in some environments
+  try {
+    pdfjs = await import('pdfjs-dist');
+  } catch (err) {
+    throw new Error('Could not resolve or import pdfjs-dist: ' + String(err));
+  }
+} else {
+  pdfjs = await import(pathToFileURL(entry).href);
+}
 
-const standardFontsPath = path.resolve(path.dirname(entry), '../../standard_fonts/');
-const standardFontDataUrl = pathToFileURL(standardFontsPath + path.sep).href;
+const standardFontsPath = entry
+  ? path.resolve(path.dirname(entry), '../../standard_fonts/')
+  : undefined;
+const standardFontDataUrl = standardFontsPath
+  ? pathToFileURL(standardFontsPath + path.sep).href
+  : undefined;
 
 const loadingTask = pdfjs.getDocument({ data, disableWorker: true, standardFontDataUrl });
 const doc = await loadingTask.promise;
