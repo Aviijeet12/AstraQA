@@ -15,9 +15,7 @@ export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
   },
-  pages: {
-    signIn: "/login",
-  },
+  // Remove signIn page override to allow public dashboard access
   providers: [
     CredentialsProvider({
       name: "Credentials",

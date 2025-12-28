@@ -1,7 +1,7 @@
 
 
-import DashboardPage from "./dashboard/page"
+import PublicDashboard from "./public-dashboard/page";
 
 export default function Home() {
-  return <DashboardPage />
+  return <PublicDashboard />;
 }

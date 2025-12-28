@@ -130,7 +130,9 @@ async function readTextFromFile(absPath: string, mime: string) {
 
 export async function POST() {
   const { userId, response } = await requireUserId();
-  if (!userId) return response;
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const files = await prisma.file.findMany({
     where: { userId },

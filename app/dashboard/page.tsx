@@ -1,83 +1,23 @@
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { FileText, PlayCircle, CheckCircle2, ArrowRight, Upload, Code2 } from "lucide-react"
-import Link from "next/link"
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/nextauth"
-import LoginClient from "../login/login-client"
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { FileText, PlayCircle, CheckCircle2, ArrowRight, Upload, Code2 } from "lucide-react";
+import Link from "next/link";
 const formatTimeAgo = (date: Date) => {
-  const diffMs = Date.now() - date.getTime()
-  const diffMins = Math.max(0, Math.floor(diffMs / 60000))
-  if (diffMins < 60) return `${diffMins} min ago`
-  const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
-  const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
-}
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.max(0, Math.floor(diffMs / 60000));
+  if (diffMins < 60) return `${diffMins} min ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+};
 
-import { getServerSession } from "next-auth/next"
-import { authOptions } from "@/lib/nextauth"
-import { prisma } from "@/lib/prisma"
 
-export default async function DashboardPage() {
-  let session = null
-  let userId = undefined
-  try {
-    session = await getServerSession(authOptions)
-    userId = (session?.user as any)?.id as string | undefined
-  } catch {}
-
+export default function DashboardPage() {
+  // Public dashboard. No authentication required. Protected actions should handle auth separately.
   let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null;
   let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
   let done = 0, failed = 0, total = 0, successRate = null;
-  if (userId) {
-    const weekAgo: Date = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
-      prisma.file.count({ where: { userId } }),
-      prisma.testCase.count({ where: { userId, createdAt: { gte: weekAgo } } }),
-      prisma.script.count({ where: { userId } }),
-      prisma.knowledgeBaseBuild.findFirst({
-        where: { userId },
-        orderBy: { startedAt: "desc" },
-        select: { processed: true, failed: true },
-      }),
-      prisma.testCase.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: { id: true, testId: true, scenario: true, createdAt: true },
-      }),
-      prisma.script.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        select: { id: true, testCaseId: true, createdAt: true },
-      }),
-    ])
-    done = latestKbBuild?.processed ?? 0
-    failed = latestKbBuild?.failed ?? 0
-    total = done + failed
-    successRate = total > 0 ? Math.round((done / total) * 100) : null
-    recent = [
-      ...recentTests.map((t) => ({
-        kind: "test" as const,
-        key: `test-${t.id}`,
-        title: t.scenario,
-        subtitle: `${t.testId} • ${formatTimeAgo(t.createdAt)}`,
-        href: "/dashboard/test-generator",
-        createdAt: t.createdAt,
-      })),
-      ...recentScripts.map((s) => ({
-        kind: "script" as const,
-        key: `script-${s.id}`,
-        title: "Selenium script generated",
-        subtitle: `${formatTimeAgo(s.createdAt)}`,
-        href: "/dashboard/script-generator",
-        createdAt: s.createdAt,
-      })),
-    ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, 6)
-  }
 
   return (
     <div className="flex flex-col gap-6 p-6 relative">
@@ -211,18 +151,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-      {/* Overlay sign-in prompt for unauthenticated users */}
-      {!userId && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="max-w-md w-full">
-            <div className="mb-6 text-center">
-              <h2 className="text-2xl font-bold">Sign in to use AstraQA</h2>
-              <p className="text-muted-foreground mt-2">Sign in to generate test cases, scripts, and upload docs.</p>
-            </div>
-            <LoginClient callbackUrl="/dashboard" />
-          </div>
-        </div>
-      )}
+      {/* No login overlay. Dashboard is always public. */}
     </div>
   )
 }

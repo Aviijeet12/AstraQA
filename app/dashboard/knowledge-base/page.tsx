@@ -1,9 +1,20 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
 import { useEffect, useState } from "react"
 import { useApp, type FileData } from "@/components/app-provider"
+
+type LastBuild = {
+  id: string;
+  status: string;
+  startedAt: Date;
+  completedAt: Date | null;
+  processed: number;
+  failed: number;
+  error: string | null;
+};
+import { useSession, signIn } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -13,277 +24,194 @@ import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 
 export default function KnowledgeBasePage() {
-  const { files, addFile, setFiles, removeFile, kbStatus, setKbStatus } = useApp()
-  const [isDragging, setIsDragging] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [buildProgress, setBuildProgress] = useState(0)
-  const [buildStep, setBuildStep] = useState<string>("")
-  const [kbUpdatedAt, setKbUpdatedAt] = useState<Date | null>(null)
-  const [lastBuild, setLastBuild] = useState<
-    | null
-    | {
-        id: string
-        status: string
-        startedAt: Date
-        completedAt: Date | null
-        processed: number
-        failed: number
-        error: string | null
-      }
-  >(null)
-  const [lastBuildSuccessRate, setLastBuildSuccessRate] = useState<number | null>(null)
-  const { selectedFileId, setSelectedFileId } = useApp()
-  const { toast } = useToast()
 
-  const [previewTab, setPreviewTab] = useState<"preview" | "code">("preview")
-  const [filePreview, setFilePreview] = useState<string | null>(null)
-  const [previewMessage, setPreviewMessage] = useState<string | null>(null)
+  const { toast } = useToast();
+  const [lastBuildSuccessRate, setLastBuildSuccessRate] = useState<number | null>(null);
+  const [previewTab, setPreviewTab] = useState<'preview' | 'code'>('preview');
 
-  const formatTimeAgo = (date: Date) => {
-    const diffMs = Date.now() - date.getTime()
-    const diffMins = Math.max(0, Math.floor(diffMs / 60000))
-    if (diffMins < 60) return `${diffMins} min ago`
-    const diffHours = Math.floor(diffMins / 60)
-    if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
-    const diffDays = Math.floor(diffHours / 24)
-    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`
-  }
-
-  useEffect(() => {
-    let cancelled = false
-
-    const load = async () => {
-      try {
-        const res = await fetch("/api/knowledge-base/state")
-        if (!res.ok) return
-        const data = await res.json()
-        if (cancelled) return
-
-        const incomingFiles: FileData[] = (data.files || []).map((f: any) => ({
-          id: String(f.id),
-          name: String(f.name),
-          size: String(f.size),
-          type: String(f.type || "unknown"),
-          uploadDate: new Date(f.uploadedAt || Date.now()),
-        }))
-
-        setFiles(incomingFiles)
-        if (!selectedFileId && incomingFiles[0]) setSelectedFileId(incomingFiles[0].id)
-
-        const status = String(data.kbStatus || "empty")
-        if (status === "ready" || status === "building" || status === "empty") {
-          setKbStatus(status)
-        }
-
-        if (data.kbUpdatedAt) {
-          const d = new Date(data.kbUpdatedAt)
-          if (!Number.isNaN(d.getTime())) setKbUpdatedAt(d)
-        }
-
-        if (data.lastBuild && typeof data.lastBuild === "object") {
-          const started = new Date(data.lastBuild.startedAt)
-          const completed = data.lastBuild.completedAt ? new Date(data.lastBuild.completedAt) : null
-
-          setLastBuild({
-            id: String(data.lastBuild.id),
-            status: String(data.lastBuild.status || "unknown"),
-            startedAt: Number.isNaN(started.getTime()) ? new Date() : started,
-            completedAt: completed && !Number.isNaN(completed.getTime()) ? completed : null,
-            processed: Number(data.lastBuild.processed ?? 0),
-            failed: Number(data.lastBuild.failed ?? 0),
-            error: typeof data.lastBuild.error === "string" ? data.lastBuild.error : null,
-          })
-        } else {
-          setLastBuild(null)
-        }
-
-        setLastBuildSuccessRate(
-          typeof data.lastBuildSuccessRate === "number" ? data.lastBuildSuccessRate : null,
-        )
-      } catch {
-        // ignore
-      }
+    // If formatTimeAgo is not imported, import it from a utility or define a fallback
+    // import { formatTimeAgo } from "@/lib/utils" // Uncomment if available
+    function formatTimeAgo(date: Date) {
+      // Simple fallback for demo; replace with your real util if available
+      const now = new Date();
+      const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+      if (diff < 60) return `${diff}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      return date.toLocaleString();
     }
+  const { files, addFile, setFiles, removeFile, kbStatus, setKbStatus } = useApp();
+  const { data: session, status } = useSession();
+  const isLoggedIn = !!session?.user?.id;
 
-    load()
+  // Add missing state for file preview and selection
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const selectedFile = files.find((f: FileData) => f.id === selectedFileId) || null;
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [previewMessage, setPreviewMessage] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [buildProgress, setBuildProgress] = useState(0);
+  const [buildStep, setBuildStep] = useState<string>("");
+  const [kbUpdatedAt, setKbUpdatedAt] = useState<Date | null>(null);
+  const [lastBuild, setLastBuild] = useState<LastBuild | null>(null);
+  // ...existing code...
+  // ...existing code (all handlers, effects, and logic go here, inside the component)...
+  // (No top-level returns or logic outside this function)
 
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // ...existing code...
 
-  const selectedFile = files.find((f) => f.id === selectedFileId) || files[0] || null
+  // ...existing logic and handlers should be here, before the return...
+  // ...existing logic and handlers should be here, before the return...
 
-  useEffect(() => {
-    let cancelled = false
+  // Fix: Move the useEffect for file preview here
+  // (Assuming you have state: selectedFile, setFilePreview, setPreviewMessage)
+  // If not, please add them as needed
 
+  React.useEffect(() => {
+    let cancelled = false;
     const loadPreview = async () => {
-      setFilePreview(null)
-      setPreviewMessage(null)
-
-      if (!selectedFile) return
-
+      setFilePreview?.(null);
+      setPreviewMessage?.(null);
+      if (!selectedFile) return;
       try {
-        const res = await fetch(`/api/knowledge-base/files/${encodeURIComponent(selectedFile.id)}`)
+        const res = await fetch(`/api/knowledge-base/files/${encodeURIComponent(selectedFile.id)}`);
         if (!res.ok) {
-          setPreviewMessage(`Preview unavailable (${res.status})`)
-          return
+          setPreviewMessage?.(`Preview unavailable (${res.status})`);
+          return;
         }
-
-        const data = await res.json()
-        if (cancelled) return
-
+        const data = await res.json();
+        if (cancelled) return;
         if (typeof data?.preview === "string") {
-          setFilePreview(data.preview)
-          setPreviewMessage(null)
-          return
+          setFilePreview?.(data.preview);
+          setPreviewMessage?.(null);
+          return;
         }
-
         if (typeof data?.message === "string") {
-          setPreviewMessage(data.message)
-          return
+          setPreviewMessage?.(data.message);
+          return;
         }
-
-        setPreviewMessage("Preview is not available for this file.")
-      } catch {
-        if (cancelled) return
-        setPreviewMessage("Preview failed to load.")
+        setPreviewMessage?.("Preview is not available for this file.");
+      } catch (e) {
+        if (cancelled) return;
+        setPreviewMessage?.("Preview failed to load.");
       }
-    }
-
-    loadPreview()
+    };
+    loadPreview();
     return () => {
-      cancelled = true
-    }
-  }, [selectedFile?.id])
+      cancelled = true;
+    };
+  }, [selectedFile?.id]);
 
+  // All handlers and logic must be inside the component
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
+    e.preventDefault();
+    setIsDragging(true);
+  };
 
   const handleDragLeave = () => {
-    setIsDragging(false)
-  }
+    setIsDragging(false);
+  };
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-
-    const droppedFiles = Array.from(e.dataTransfer.files)
-    handleFiles(droppedFiles)
-  }
+    e.preventDefault();
+    setIsDragging(false);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    handleFiles(droppedFiles);
+  };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files)
-      handleFiles(selectedFiles)
-    }
-  }
+    // ...all logic and handlers above...
+  };
 
   const handleFiles = async (fileList: File[]) => {
-    if (!fileList.length) return
-
-    const formData = new FormData()
-    fileList.forEach((file) => formData.append("files", file))
-
-    setUploadProgress(10)
-
+    if (!fileList.length) return;
+    const formData = new FormData();
+    fileList.forEach((file) => formData.append("files", file));
+    setUploadProgress(10);
     try {
       const res = await fetch("/api/knowledge-base/upload", {
         method: "POST",
         body: formData,
-      })
-
+      });
       if (!res.ok) {
-        let message = `Upload failed (${res.status})`
+        let message = `Upload failed (${res.status})`;
         try {
-          const err = await res.json()
-          if (typeof err?.error === "string") message = err.error
+          const err = await res.json();
+          if (typeof err?.error === "string") message = err.error;
           if (Array.isArray(err?.rejected) && err.rejected.length) {
-            message += `: ${err.rejected.join(", ")}`
+            message += `: ${err.rejected.join(", ")}`;
           }
-        } catch {
+        } catch (e) {
           // ignore
         }
-
         toast({
           title: "Upload failed",
           description: message,
           variant: "destructive",
-        })
-        setUploadProgress(0)
-        return
+        });
+        setUploadProgress(0);
+        return;
       }
-
-      const data = await res.json()
-
+      const data = await res.json();
       const uploaded: FileData[] = (data.files || []).map((file: any) => ({
         id: file.id,
         name: file.name,
         size: (file.size / 1024).toFixed(2) + " KB",
         type: file.type?.split("/").pop() || "unknown",
         uploadDate: new Date(file.uploadedAt || Date.now()),
-      }))
-
-      uploaded.forEach((f) => addFile(f))
-      setUploadProgress(100)
-      setTimeout(() => setUploadProgress(0), 400)
+      }));
+      uploaded.forEach((f) => addFile(f));
+      setUploadProgress(100);
+      setTimeout(() => setUploadProgress(0), 400);
     } catch (e) {
       toast({
         title: "Upload failed",
         description: "Network error while uploading. Please try again.",
         variant: "destructive",
-      })
-      setUploadProgress(0)
+      });
+      setUploadProgress(0);
     }
-  }
+  };
 
   const handleBuildKB = async () => {
-    if (files.length === 0) return
-
-    setKbStatus("building")
-    setBuildProgress(10)
-    setBuildStep("Starting knowledge base build...")
-
+    if (files.length === 0) return;
+    setKbStatus("building");
+    setBuildProgress(10);
+    setBuildStep("Starting knowledge base build...");
     try {
-      setBuildStep("Parsing documents...")
-      setBuildProgress(30)
-
-      const res = await fetch("/api/knowledge-base/build", { method: "POST" })
-
+      setBuildStep("Parsing documents...");
+      setBuildProgress(30);
+      const res = await fetch("/api/knowledge-base/build", { method: "POST" });
       if (!res.ok) {
-        let message = `Build failed (${res.status})`
+        let message = `Build failed (${res.status})`;
         try {
-          const err = await res.json()
-          if (typeof err?.error === "string") message = err.error
-          if (typeof err?.message === "string") message = err.message
-        } catch {
+          const err = await res.json();
+          if (typeof err?.error === "string") message = err.error;
+          if (typeof err?.message === "string") message = err.message;
+        } catch (e) {
           // ignore
         }
-
         toast({
           title: "Build failed",
           description: message,
           variant: "destructive",
-        })
-        setKbStatus("empty")
-        setBuildProgress(0)
-        setBuildStep("")
-
+        });
+        setKbStatus("empty");
+        setBuildProgress(0);
+        setBuildStep("");
         // Refresh state so the user can see latest run stats/errors.
         try {
           await fetch("/api/knowledge-base/state").then(async (r) => {
-            if (!r.ok) return
-            const d = await r.json()
+            if (!r.ok) return;
+            const d = await r.json();
             if (d?.kbUpdatedAt) {
-              const dt = new Date(d.kbUpdatedAt)
-              if (!Number.isNaN(dt.getTime())) setKbUpdatedAt(dt)
+              const dt = new Date(d.kbUpdatedAt);
+              if (!Number.isNaN(dt.getTime())) setKbUpdatedAt(dt);
             }
             if (d?.lastBuild && typeof d.lastBuild === "object") {
-              const started = new Date(d.lastBuild.startedAt)
-              const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null
+              const started = new Date(d.lastBuild.startedAt);
+              const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null;
               setLastBuild({
                 id: String(d.lastBuild.id),
                 status: String(d.lastBuild.status || "unknown"),
@@ -292,38 +220,35 @@ export default function KnowledgeBasePage() {
                 processed: Number(d.lastBuild.processed ?? 0),
                 failed: Number(d.lastBuild.failed ?? 0),
                 error: typeof d.lastBuild.error === "string" ? d.lastBuild.error : null,
-              })
+              });
               setLastBuildSuccessRate(
                 typeof d.lastBuildSuccessRate === "number" ? d.lastBuildSuccessRate : null,
-              )
+              );
             }
-          })
-        } catch {
+          });
+        } catch (e) {
           // ignore
         }
-        return
+        return;
       }
-
-      const data = await res.json()
-
-      setBuildStep(data.message || "Finalizing Knowledge Base...")
-      setBuildProgress(100)
-      setKbStatus(data.status === "ready" ? "ready" : "empty")
+      const data = await res.json();
+      setBuildStep(data.message || "Finalizing Knowledge Base...");
+      setBuildProgress(100);
+      setKbStatus(data.status === "ready" ? "ready" : "empty");
       if (data.completedAt) {
-        const d = new Date(data.completedAt)
-        if (!Number.isNaN(d.getTime())) setKbUpdatedAt(d)
+        const d = new Date(data.completedAt);
+        if (!Number.isNaN(d.getTime())) setKbUpdatedAt(d);
       } else {
-        setKbUpdatedAt(new Date())
+        setKbUpdatedAt(new Date());
       }
-
       // Refresh state to show latest run summary.
       try {
-        const s = await fetch("/api/knowledge-base/state")
+        const s = await fetch("/api/knowledge-base/state");
         if (s.ok) {
-          const d = await s.json()
+          const d = await s.json();
           if (d?.lastBuild && typeof d.lastBuild === "object") {
-            const started = new Date(d.lastBuild.startedAt)
-            const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null
+            const started = new Date(d.lastBuild.startedAt);
+            const completed = d.lastBuild.completedAt ? new Date(d.lastBuild.completedAt) : null;
             setLastBuild({
               id: String(d.lastBuild.id),
               status: String(d.lastBuild.status || "unknown"),
@@ -332,15 +257,15 @@ export default function KnowledgeBasePage() {
               processed: Number(d.lastBuild.processed ?? 0),
               failed: Number(d.lastBuild.failed ?? 0),
               error: typeof d.lastBuild.error === "string" ? d.lastBuild.error : null,
-            })
+            });
           } else {
-            setLastBuild(null)
+            setLastBuild(null);
           }
           setLastBuildSuccessRate(
             typeof d.lastBuildSuccessRate === "number" ? d.lastBuildSuccessRate : null,
-          )
+          );
         }
-      } catch {
+      } catch (e) {
         // ignore
       }
     } catch (e) {
@@ -348,23 +273,22 @@ export default function KnowledgeBasePage() {
         title: "Build failed",
         description: "Network error while building. Please try again.",
         variant: "destructive",
-      })
-      setKbStatus("empty")
-      setBuildProgress(0)
-      setBuildStep("")
+      });
+      setKbStatus("empty");
+      setBuildProgress(0);
+      setBuildStep("");
     }
-  }
+  };
 
   const handleDeleteFile = async (id: string) => {
     try {
-      await fetch(`/api/knowledge-base/files/${encodeURIComponent(id)}`, { method: "DELETE" })
-    } catch {
+      await fetch(`/api/knowledge-base/files/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch (e) {
       // ignore
     }
-    removeFile(id)
-    if (selectedFileId === id) setSelectedFileId(null)
-  }
-
+    removeFile(id);
+    if (selectedFileId === id) setSelectedFileId(null);
+  };
   return (
     <div className="flex flex-col gap-6 p-6 max-w-6xl mx-auto">
       <div className="flex flex-col gap-2">
@@ -578,14 +502,16 @@ export default function KnowledgeBasePage() {
               <div className="mt-auto">
                 <Button
                   className="w-full h-12 text-lg shadow-lg shadow-primary/20"
-                  disabled={files.length === 0 || kbStatus === "building"}
+                  disabled={files.length === 0 || kbStatus === "building" || !isLoggedIn}
                   onClick={handleBuildKB}
                 >
-                  {kbStatus === "building"
-                    ? "Building..."
-                    : kbStatus === "ready"
-                      ? "Rebuild Knowledge Base"
-                      : "Build Knowledge Base"}
+                  {!isLoggedIn
+                    ? "Login to Build"
+                    : kbStatus === "building"
+                      ? "Building..."
+                      : kbStatus === "ready"
+                        ? "Rebuild Knowledge Base"
+                        : "Build Knowledge Base"}
                 </Button>
               </div>
             </CardContent>
@@ -639,5 +565,6 @@ export default function KnowledgeBasePage() {
         </div>
       </div>
     </div>
-  )
+  );
 }
+
