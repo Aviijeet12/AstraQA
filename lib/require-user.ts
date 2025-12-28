@@ -1,3 +1,6 @@
+// DO NOT import this file in any page or client component!
+// This is for server-side (API route) use only to avoid circular/duplicate import errors.
+
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/nextauth";
