@@ -24,14 +24,14 @@ export default async function DashboardPage() {
     userId = (session?.user as any)?.id as string | undefined
   } catch {}
 
-  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null, recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [], done = 0, failed = 0, total = 0, successRate = null;
+  let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null;
+  let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
+  let done = 0, failed = 0, total = 0, successRate = null;
   if (userId) {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     [filesCount, testCasesWeek, scriptsCount, latestKbBuild, recentTests, recentScripts] = await Promise.all([
-      let filesCount = 0, testCasesWeek = 0, scriptsCount = 0, latestKbBuild = null;
-      let recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [];
-      let done = 0, failed = 0, total = 0, successRate = null;
-      recentTests: any[] = [], recentScripts: any[] = [], recent: any[] = [], done = 0, failed = 0, total = 0, successRate = null;
+      prisma.file.count({ where: { userId } }),
+      prisma.testCase.count({ where: { userId, createdAt: { gte: weekAgo } } }),
       prisma.script.count({ where: { userId } }),
       prisma.knowledgeBaseBuild.findFirst({
         where: { userId },
