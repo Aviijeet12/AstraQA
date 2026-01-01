@@ -3,7 +3,8 @@
   "buildCommand": "npm run migrate:deploy && npm run build",
   "build": {
     "env": {
-      "NODE_VERSION": "20"
+      "NODE_VERSION": "20",
+      "PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK": "1"
     }
   }
 }
