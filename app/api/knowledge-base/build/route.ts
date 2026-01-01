@@ -468,14 +468,17 @@ export async function POST() {
 
     return NextResponse.json(
       {
-        error: 'Knowledge base build failed',
+        status: finalStatus,
+        error: 'Knowledge base build could not process any files',
         message,
         buildId: build.id,
         processed,
         failed,
         failedJobErrors,
+        hint:
+          "At least one Knowledge Base file record points to a missing or inaccessible Storage object. Delete the failing file from the Knowledge Base and re-upload it, or ensure the server has SUPABASE_SERVICE_ROLE_KEY configured so it can download private objects.",
       },
-      { status: 500 },
+      { status: 200 },
     );
   }
 

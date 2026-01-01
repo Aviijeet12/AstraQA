@@ -16,14 +16,18 @@ export const GEMINI_API_KEY = optional(process.env.GEMINI_API_KEY)
 export const ANTHROPIC_API_KEY = optional(process.env.ANTHROPIC_API_KEY)
 export const ANTHROPIC_MODEL = optional(process.env.ANTHROPIC_MODEL)
 export const HF_API_KEY = optional(process.env.HF_API_KEY)
-export const SUPABASE_URL = optional(process.env.SUPABASE_URL)
-export const SUPABASE_KEY = optional(process.env.SUPABASE_KEY ?? process.env.SUPABASE_ANON_KEY)
+export const SUPABASE_URL = optional(process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL)
+export const SUPABASE_KEY = optional(
+  process.env.SUPABASE_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+)
 export const SUPABASE_SERVICE_KEY = optional(
   process.env.SUPABASE_SERVICE_KEY ??
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.SUPABASE_SERVICE_ROLE,
 )
-export const SUPABASE_BUCKET = optional(process.env.SUPABASE_BUCKET)
+export const SUPABASE_BUCKET = optional(process.env.SUPABASE_BUCKET ?? process.env.NEXT_PUBLIC_SUPABASE_BUCKET)
 
 // Optional vector DB / embeddings
 export const QDRANT_URL = optional(process.env.QDRANT_URL)
