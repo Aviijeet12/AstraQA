@@ -17,8 +17,12 @@ export const ANTHROPIC_API_KEY = optional(process.env.ANTHROPIC_API_KEY)
 export const ANTHROPIC_MODEL = optional(process.env.ANTHROPIC_MODEL)
 export const HF_API_KEY = optional(process.env.HF_API_KEY)
 export const SUPABASE_URL = optional(process.env.SUPABASE_URL)
-export const SUPABASE_KEY = optional(process.env.SUPABASE_KEY)
-export const SUPABASE_SERVICE_KEY = optional(process.env.SUPABASE_SERVICE_KEY)
+export const SUPABASE_KEY = optional(process.env.SUPABASE_KEY ?? process.env.SUPABASE_ANON_KEY)
+export const SUPABASE_SERVICE_KEY = optional(
+  process.env.SUPABASE_SERVICE_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE,
+)
 export const SUPABASE_BUCKET = optional(process.env.SUPABASE_BUCKET)
 
 // Optional vector DB / embeddings
