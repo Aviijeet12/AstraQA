@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import path from "path";
-import { supabase, SUPABASE_STORAGE_BUCKET } from "@/lib/supabase";
+import { supabase, SUPABASE_KEY_ROLE, SUPABASE_STORAGE_BUCKET, SUPABASE_USING_SERVICE_ROLE } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -118,11 +118,7 @@ export async function POST(req: Request) {
     return status === 403 || statusCode === 403 || statusCode === "403" || msg.toLowerCase().includes("row-level security")
   }
 
-  const serviceRoleConfigured = Boolean(
-    process.env.SUPABASE_SERVICE_KEY ||
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.SUPABASE_SERVICE_ROLE,
-  )
+  const serviceRoleConfigured = SUPABASE_USING_SERVICE_ROLE
 
   // Prevent overwrites / duplicate uploads: treat an existing filename for this user as a duplicate,
   // except when the existing record is a legacy/broken path (repair flow).
@@ -312,9 +308,12 @@ export async function POST(req: Request) {
 
   // If nothing was uploaded/repaired, return a non-200 so the UI shows the failure.
   if (created.length === 0 && repaired.length === 0 && (errors.length > 0 || duplicates.length > 0)) {
+    const rlsBlocked = errors.some((e) => e.reason.toLowerCase().includes("row-level security") || e.reason.toLowerCase().includes("rls"))
     const hint = serviceRoleConfigured
       ? "Supabase rejected the upload. Check Supabase Storage bucket policies (RLS) and bucket name."
-      : "Server is likely missing SUPABASE_SERVICE_ROLE_KEY, so uploads to a protected bucket will be blocked by RLS. Add SUPABASE_SERVICE_ROLE_KEY in Vercel (server env) and redeploy."
+      : SUPABASE_KEY_ROLE === "anon"
+        ? "Server is using an anon Supabase key (role=anon), so uploads to a protected bucket will be blocked by RLS. In Vercel, set SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) to your Supabase service_role key (server env), redeploy, and retry."
+        : "Server is likely missing a Supabase service_role key, so uploads to a protected bucket will be blocked by RLS. In Vercel, set SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) (server env), redeploy, and retry."
 
     return NextResponse.json(
       {
@@ -325,7 +324,7 @@ export async function POST(req: Request) {
         duplicates,
         errors,
       },
-      { status: 500 },
+      { status: rlsBlocked ? 403 : 500 },
     )
   }
 

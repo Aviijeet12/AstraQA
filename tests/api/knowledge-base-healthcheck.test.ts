@@ -22,6 +22,8 @@ vi.mock("@/lib/prisma", () => {
 vi.mock("@/lib/supabase", () => {
   return {
     SUPABASE_STORAGE_BUCKET: "astraA",
+    SUPABASE_USING_SERVICE_ROLE: false,
+    SUPABASE_KEY_ROLE: "anon",
     supabase: {
       storage: {
         from: vi.fn(() => ({

@@ -28,6 +28,8 @@ describe("POST /api/knowledge-base/upload", () => {
 
     vi.doMock("@/lib/supabase", () => ({
       SUPABASE_STORAGE_BUCKET: "astraA",
+      SUPABASE_USING_SERVICE_ROLE: false,
+      SUPABASE_KEY_ROLE: "anon",
       supabase: {
         storage: {
           from: vi.fn(() => ({
@@ -68,6 +70,8 @@ describe("POST /api/knowledge-base/upload", () => {
 
     vi.doMock("@/lib/supabase", () => ({
       SUPABASE_STORAGE_BUCKET: "astraA",
+      SUPABASE_USING_SERVICE_ROLE: false,
+      SUPABASE_KEY_ROLE: "anon",
       supabase: {
         storage: {
           from: vi.fn(() => ({
@@ -126,6 +130,8 @@ describe("POST /api/knowledge-base/upload", () => {
 
     vi.doMock("@/lib/supabase", () => ({
       SUPABASE_STORAGE_BUCKET: "astraA",
+      SUPABASE_USING_SERVICE_ROLE: false,
+      SUPABASE_KEY_ROLE: "anon",
       supabase: {
         storage: {
           from: vi.fn(() => ({
