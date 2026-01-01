@@ -91,6 +91,7 @@ export async function POST(req: Request) {
   const created = [] as Array<{ id: string; name: string; size: number; type: string; uploadedAt: string }>;
   const duplicates = [] as Array<{ name: string; reason: string }>;
   const repaired = [] as Array<{ id: string; name: string; size: number; type: string; uploadedAt: string }>;
+  const errors = [] as Array<{ name: string; reason: string }>;
 
   const normalizeKey = (p: string) => (p || "").replace(/^\/*/, "").replace(/\\/g, "/")
   const isSafeStorageKey = (p: string) => {
@@ -108,6 +109,20 @@ export async function POST(req: Request) {
     const msg = typeof e?.message === "string" ? e.message : ""
     return msg.includes("404") || msg.toLowerCase().includes("not found")
   }
+
+  const isRlsBlocked = (err: unknown) => {
+    const e: any = err
+    const status = e?.status ?? e?.originalError?.status
+    const statusCode = e?.statusCode ?? e?.originalError?.statusCode
+    const msg = typeof e?.message === "string" ? e.message : ""
+    return status === 403 || statusCode === 403 || statusCode === "403" || msg.toLowerCase().includes("row-level security")
+  }
+
+  const serviceRoleConfigured = Boolean(
+    process.env.SUPABASE_SERVICE_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE,
+  )
 
   // Prevent overwrites / duplicate uploads: treat an existing filename for this user as a duplicate,
   // except when the existing record is a legacy/broken path (repair flow).
@@ -159,7 +174,10 @@ export async function POST(req: Request) {
 
           if (uploadErr) {
             console.log('[UPLOAD] Supabase upload error during restore:', uploadErr);
-            duplicates.push({ name: filename, reason: uploadErr.message || "Restore upload rejected" });
+                const reason = isRlsBlocked(uploadErr)
+                  ? "Storage upload blocked by Supabase RLS policy. Configure SUPABASE_SERVICE_ROLE_KEY on the server (Vercel) or adjust Storage policies."
+                  : uploadErr.message || "Restore upload rejected"
+                errors.push({ name: filename, reason });
             continue;
           }
 
@@ -201,6 +219,14 @@ export async function POST(req: Request) {
         if (uploadErr) {
           // If the object already exists, we can still repair the DB pointer.
           console.log('[UPLOAD] Supabase upload error during repair:', uploadErr);
+          if (isRlsBlocked(uploadErr)) {
+            errors.push({
+              name: filename,
+              reason:
+                "Storage upload blocked by Supabase RLS policy. Configure SUPABASE_SERVICE_ROLE_KEY on the server (Vercel) or adjust Storage policies.",
+            })
+            continue
+          }
         }
 
         const updated = await prisma.file.update({
@@ -239,7 +265,15 @@ export async function POST(req: Request) {
       if (uploadErr) {
         console.log('[UPLOAD] Supabase upload error:', uploadErr);
         // Common case: object already exists if bucket path collides.
-        duplicates.push({ name: filename, reason: uploadErr.message || "Upload rejected" });
+        if (isRlsBlocked(uploadErr)) {
+          errors.push({
+            name: filename,
+            reason:
+              "Storage upload blocked by Supabase RLS policy. Ensure Vercel has SUPABASE_SERVICE_ROLE_KEY (server env, not NEXT_PUBLIC_*) and redeploy.",
+          })
+        } else {
+          duplicates.push({ name: filename, reason: uploadErr.message || "Upload rejected" });
+        }
         continue;
       }
 
@@ -265,8 +299,35 @@ export async function POST(req: Request) {
       existingByName.set(filename, { id: row.id, filename: row.filename, path: storagePath, mime: row.mime, size: row.size, createdAt: row.createdAt });
     } catch (err) {
       console.log('[UPLOAD] Error uploading to Supabase:', err);
+      errors.push({
+        name: upload.name || "upload",
+        reason: isRlsBlocked(err)
+          ? "Storage upload blocked by Supabase RLS policy. Ensure Vercel has SUPABASE_SERVICE_ROLE_KEY (server env, not NEXT_PUBLIC_*) and redeploy."
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      })
     }
   }
 
-  return NextResponse.json({ files: created, repaired, duplicates });
+  // If nothing was uploaded/repaired, return a non-200 so the UI shows the failure.
+  if (created.length === 0 && repaired.length === 0 && (errors.length > 0 || duplicates.length > 0)) {
+    const hint = serviceRoleConfigured
+      ? "Supabase rejected the upload. Check Supabase Storage bucket policies (RLS) and bucket name."
+      : "Server is likely missing SUPABASE_SERVICE_ROLE_KEY, so uploads to a protected bucket will be blocked by RLS. Add SUPABASE_SERVICE_ROLE_KEY in Vercel (server env) and redeploy."
+
+    return NextResponse.json(
+      {
+        error: "Upload failed",
+        hint,
+        files: created,
+        repaired,
+        duplicates,
+        errors,
+      },
+      { status: 500 },
+    )
+  }
+
+  return NextResponse.json({ files: created, repaired, duplicates, errors });
 }
