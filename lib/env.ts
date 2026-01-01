@@ -18,6 +18,8 @@ export const ANTHROPIC_MODEL = optional(process.env.ANTHROPIC_MODEL)
 export const HF_API_KEY = optional(process.env.HF_API_KEY)
 export const SUPABASE_URL = optional(process.env.SUPABASE_URL)
 export const SUPABASE_KEY = optional(process.env.SUPABASE_KEY)
+export const SUPABASE_SERVICE_KEY = optional(process.env.SUPABASE_SERVICE_KEY)
+export const SUPABASE_BUCKET = optional(process.env.SUPABASE_BUCKET)
 
 // Optional vector DB / embeddings
 export const QDRANT_URL = optional(process.env.QDRANT_URL)

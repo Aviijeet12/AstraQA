@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
+const mockSupabaseWithDownload = (buf: Buffer) => {
+  vi.doMock("@/lib/supabase", () => ({
+    SUPABASE_STORAGE_BUCKET: "astraA",
+    supabase: {
+      storage: {
+        from: vi.fn(() => ({
+          download: vi.fn(async () => ({
+            data: new Blob([buf]),
+            error: null,
+          })),
+        })),
+      },
+    },
+  }))
+}
+
 describe("POST /api/knowledge-base/build", () => {
   it("returns 401 when not authenticated", async () => {
     vi.resetModules();
@@ -17,11 +33,7 @@ describe("POST /api/knowledge-base/build", () => {
       prisma: {},
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        readFile: vi.fn(async () => Buffer.from("")),
-      },
-    }));
+    mockSupabaseWithDownload(Buffer.from(""))
 
     vi.doMock("@/lib/rag", () => ({
       indexChunksInQdrant: vi.fn(async () => undefined),
@@ -53,11 +65,7 @@ describe("POST /api/knowledge-base/build", () => {
       },
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        readFile: vi.fn(async () => Buffer.from("")),
-      },
-    }));
+    mockSupabaseWithDownload(Buffer.from(""))
 
     vi.doMock("@/lib/rag", () => ({
       indexChunksInQdrant: vi.fn(async () => undefined),
@@ -112,11 +120,7 @@ describe("POST /api/knowledge-base/build", () => {
       },
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        readFile: vi.fn(async () => Buffer.from("Hello world. This is a test document.")),
-      },
-    }));
+    mockSupabaseWithDownload(Buffer.from("Hello world. This is a test document."))
 
     vi.doMock("@/lib/rag", () => ({
       indexChunksInQdrant,

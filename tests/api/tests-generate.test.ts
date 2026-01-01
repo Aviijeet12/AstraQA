@@ -21,9 +21,20 @@ describe("POST /api/tests/generate", () => {
       })),
     }));
 
-    vi.doMock("@/lib/prisma", () => ({ prisma: {} }));
+    vi.doMock("@/lib/prisma", () => ({
+      prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
+      },
+    }));
     vi.doMock("@/lib/rag", () => ({ retrieveChunks: vi.fn(async () => ({ mode: "fts", chunks: [] })) }));
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "x" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini: vi.fn(async () => ({})) }));
 
     const mod = await import("@/app/api/tests/generate/route");
@@ -40,9 +51,20 @@ describe("POST /api/tests/generate", () => {
       requireUserId: vi.fn(async () => ({ userId: "u1" })),
     }));
 
-    vi.doMock("@/lib/prisma", () => ({ prisma: {} }));
+    vi.doMock("@/lib/prisma", () => ({
+      prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
+      },
+    }));
     vi.doMock("@/lib/rag", () => ({ retrieveChunks: vi.fn(async () => ({ mode: "fts", chunks: [] })) }));
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "x" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini: vi.fn(async () => ({})) }));
 
     const mod = await import("@/app/api/tests/generate/route");
@@ -59,9 +81,20 @@ describe("POST /api/tests/generate", () => {
       requireUserId: vi.fn(async () => ({ userId: "u1" })),
     }));
 
-    vi.doMock("@/lib/prisma", () => ({ prisma: {} }));
+    vi.doMock("@/lib/prisma", () => ({
+      prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
+      },
+    }));
     vi.doMock("@/lib/rag", () => ({ retrieveChunks: vi.fn(async () => ({ mode: "fts", chunks: [] })) }));
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "", HF_API_KEY: "" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini: vi.fn(async () => ({})) }));
     vi.doMock("@/lib/hf", () => ({ callHuggingFace: vi.fn(async () => ([])) }));
 
@@ -102,6 +135,9 @@ describe("POST /api/tests/generate", () => {
 
     vi.doMock("@/lib/prisma", () => ({
       prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
         testCase: {
           createMany,
         },
@@ -112,7 +148,12 @@ describe("POST /api/tests/generate", () => {
       retrieveChunks: vi.fn(async () => ({ mode: "fts", chunks: [] })),
     }));
 
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "", HF_API_KEY: "hf" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "hf",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini: vi.fn(async () => ({})) }));
     vi.doMock("@/lib/hf", () => ({ callHuggingFace }));
 
@@ -158,6 +199,9 @@ describe("POST /api/tests/generate", () => {
 
     vi.doMock("@/lib/prisma", () => ({
       prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
         testCase: {
           createMany,
         },
@@ -168,7 +212,12 @@ describe("POST /api/tests/generate", () => {
       retrieveChunks: vi.fn(async () => ({ mode: "fts", chunks: [] })),
     }));
 
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "", HF_API_KEY: "hf" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "hf",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini }));
     vi.doMock("@/lib/hf", () => ({ callHuggingFace: vi.fn(async () => ({ choices: [{ message: { content: "[]" } }] })) }));
 
@@ -217,6 +266,9 @@ describe("POST /api/tests/generate", () => {
 
     vi.doMock("@/lib/prisma", () => ({
       prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
         testCase: {
           createMany: vi.fn(async () => ({ count: 0 })),
         },
@@ -230,7 +282,12 @@ describe("POST /api/tests/generate", () => {
       })),
     }));
 
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "x" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini }));
 
     const mod = await import("@/app/api/tests/generate/route");
@@ -280,6 +337,9 @@ describe("POST /api/tests/generate", () => {
 
     vi.doMock("@/lib/prisma", () => ({
       prisma: {
+        userSettings: {
+          findUnique: vi.fn(async () => null),
+        },
         testCase: {
           createMany,
         },
@@ -296,7 +356,12 @@ describe("POST /api/tests/generate", () => {
       })),
     }));
 
-    vi.doMock("@/lib/env", () => ({ GEMINI_API_KEY: "x" }));
+    vi.doMock("@/lib/env", () => ({
+      GEMINI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "",
+      HF_API_KEY: "",
+    }));
     vi.doMock("@/lib/gemini", () => ({ callGemini }));
 
     const mod = await import("@/app/api/tests/generate/route");

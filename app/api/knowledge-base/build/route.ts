@@ -1,130 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { indexChunksInQdrant } from "@/lib/rag";
+import { supabase, SUPABASE_STORAGE_BUCKET } from "@/lib/supabase";
 import path from "path";
 import { promises as fs } from "fs";
-import { indexChunksInQdrant } from "@/lib/rag";
-import os from "os";
-import { randomUUID } from "crypto";
-import { spawn } from "child_process";
-import { createRequire } from 'module';
-
-// Hint to bundlers/packagers: attempt to resolve known pdfjs entry so the dependency
-// is included in serverless deployments even when referenced dynamically inside
-// an evaluated child script. This is safe because resolution failures are caught.
-try {
-  const _req = createRequire(import.meta.url);
-  _req.resolve('pdfjs-dist/legacy/build/pdf.mjs');
-} catch (_) {
-  // ignore; this only helps the packager include pdfjs-dist when possible
-}
+// Use `pdf-parse` for PDFs to avoid deep static imports of `pdfjs-dist`.
+// `pdf-parse` is already a dependency and is serverless-friendly.
 
 export const runtime = "nodejs";
-
-async function extractPdfTextViaSubprocess(absPath: string) {
-  const outPath = path.join(os.tmpdir(), `kb-pdf-${randomUUID()}.txt`);
-
-  const script = String.raw`
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-
-const args = process.argv.slice(-2);
-const inPath = args[0];
-const outPath = args[1];
-if (!inPath || !outPath) throw new Error('Missing args');
-
-const buf = await fs.readFile(inPath);
-const data = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-
-let pdfjs;
-// Try several candidate entry points for pdfjs-dist — different installs/package layouts
-const candidates = [
-  'pdfjs-dist/legacy/build/pdf.mjs',
-  'pdfjs-dist/legacy/build/pdf.js',
-  'pdfjs-dist/build/pdf.mjs',
-  'pdfjs-dist/build/pdf.js',
-  'pdfjs-dist'
-];
-let entry;
-for (const c of candidates) {
-  try {
-    entry = require.resolve(c);
-    break;
-  } catch (_) {
-    // try next
-  }
-}
-if (!entry) {
-  // Fallback to dynamic import of package name — may work in some environments
-  try {
-    pdfjs = await import('pdfjs-dist');
-  } catch (err) {
-    throw new Error('Could not resolve or import pdfjs-dist: ' + String(err));
-  }
-} else {
-  pdfjs = await import(pathToFileURL(entry).href);
-}
-
-const standardFontsPath = entry
-  ? path.resolve(path.dirname(entry), '../../standard_fonts/')
-  : undefined;
-const standardFontDataUrl = standardFontsPath
-  ? pathToFileURL(standardFontsPath + path.sep).href
-  : undefined;
-
-const loadingTask = pdfjs.getDocument({ data, disableWorker: true, standardFontDataUrl });
-const doc = await loadingTask.promise;
-try {
-  let out = '';
-  for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-    const page = await doc.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    const items = (textContent && textContent.items) ? textContent.items : [];
-    const pageText = Array.isArray(items)
-      ? items.map((it) => (typeof it?.str === 'string' ? it.str : '')).filter(Boolean).join(' ')
-      : '';
-    out += pageText + '\n';
-    import { promises as fs } from 'node:fs';
-    import path from 'node:path';
-    import { pathToFileURL } from 'node:url';
-    import { createRequire } from 'node:module';
-}
-`;
-
-  const child = spawn(
-    process.execPath,
-    ["--input-type=module", "-e", script, absPath, outPath],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
-
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (d) => {
-    stderr += d;
-  });
-
-  const exitCode: number = await new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
-
-  try {
-    if (exitCode !== 0) {
-      throw new Error(stderr.trim() || `PDF subprocess failed (exit ${exitCode})`);
-    }
-    return await fs.readFile(outPath, "utf8");
-  } finally {
-    try {
-      await fs.unlink(outPath);
-    } catch {
-      // ignore
-    }
-  }
-}
 
 const splitTextIntoChunks = (text: string, maxChars = 1500, overlap = 200) => {
   const chunks: string[] = [];
@@ -140,10 +24,9 @@ const splitTextIntoChunks = (text: string, maxChars = 1500, overlap = 200) => {
   return chunks;
 };
 
-async function readTextFromFile(absPath: string, mime: string) {
-  const buf = await fs.readFile(absPath);
-
-  if (mime.includes("officedocument") || absPath.toLowerCase().endsWith(".docx")) {
+async function readTextFromBuffer(buf: Buffer, mime: string) {
+  // DOCX
+  if (mime.includes("officedocument") || mime.includes("word") || mime.includes("docx")) {
     const mod = await import("mammoth");
     const extractRawText = (mod as any).extractRawText ?? (mod as any).default?.extractRawText;
     if (typeof extractRawText === "function") {
@@ -152,12 +35,34 @@ async function readTextFromFile(absPath: string, mime: string) {
     }
   }
 
-  if (mime.includes("pdf") || absPath.toLowerCase().endsWith(".pdf")) {
-    return await extractPdfTextViaSubprocess(absPath);
+  // PDF - use `pdf-parse` to avoid bundler issues with pdfjs deep imports
+  if (mime.includes("pdf")) {
+    try {
+      const mod = await import("pdf-parse");
+      const PDFParse = (mod as any).PDFParse;
+      if (typeof PDFParse !== "function") {
+        throw new Error(`pdf-parse: missing PDFParse export (keys=${Object.keys(mod as any).join(",")})`);
+      }
+
+      const parser = new PDFParse();
+      if (typeof (parser as any).load !== "function" || typeof (parser as any).getText !== "function") {
+        throw new Error("pdf-parse: PDFParse instance missing load/getText methods");
+      }
+
+      await (parser as any).load(buf as Buffer);
+      const text = await (parser as any).getText();
+      if (typeof text === "string") return text;
+      if (text && typeof (text as any).text === "string") return String((text as any).text);
+      return "";
+    } catch (err) {
+      console.error('[KB BUILD] pdf-parse failed:', err);
+      throw err;
+    }
   }
 
+  // JSON
   const text = buf.toString("utf-8");
-  if (mime.includes("json") || absPath.toLowerCase().endsWith(".json")) {
+  if (mime.includes("json")) {
     try {
       const obj = JSON.parse(text);
       return typeof obj === "object" ? JSON.stringify(obj, null, 2) : String(obj);
@@ -169,7 +74,73 @@ async function readTextFromFile(absPath: string, mime: string) {
   return text;
 }
 
+const isSafeStorageKey = (p: string) => {
+  if (!p) return false;
+  // Keys must be object paths, not URLs.
+  if (p.startsWith("http://") || p.startsWith("https://") || p.includes("://")) return false;
+  if (p.includes("\\")) return false;
+  if (p.startsWith("/")) return false;
+  if (p.includes("..")) return false;
+  return true;
+};
+
+const getBucketsToTry = () => {
+  // Prefer the configured bucket. We only add a hard-coded fallback when it differs,
+  // to avoid spamming errors like "Bucket not found" in environments that don't have it.
+  const buckets = new Set<string>();
+  buckets.add(SUPABASE_STORAGE_BUCKET);
+  if (SUPABASE_STORAGE_BUCKET !== "astraA") buckets.add("astraA");
+  return Array.from(buckets.values());
+};
+
+const normalizeKey = (p: string) => (p || "").replace(/^\/*/, "").replace(/\\/g, "/");
+
+const toUploadsRelative = (p: string) => {
+  const s = normalizeKey(p);
+  const idx = s.indexOf("tmp/uploads/");
+  if (idx >= 0) return `uploads/${s.slice(idx + "tmp/uploads/".length)}`;
+  const idx2 = s.indexOf("uploads/");
+  if (idx2 >= 0) return s.slice(idx2);
+  return s;
+};
+
+async function tryReadLegacyFileBuffer(filePath: string) {
+  const raw = (filePath || "").trim();
+  if (!raw) return null;
+
+  const candidates: string[] = [];
+
+  // Try absolute/local relative paths first.
+  try {
+    const abs = path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+    candidates.push(abs);
+  } catch {
+    // ignore
+  }
+
+  // Try mapping tmp/uploads paths to repo-local uploads/.
+  try {
+    const rel = toUploadsRelative(raw);
+    const abs2 = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
+    if (!candidates.includes(abs2)) candidates.push(abs2);
+  } catch {
+    // ignore
+  }
+
+  for (const abs of candidates) {
+    try {
+      const buf = await fs.readFile(abs);
+      return buf;
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
 export async function POST() {
+  console.log('[KB BUILD] Route hit - starting KB build');
   const { userId, response } = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -178,7 +149,7 @@ export async function POST() {
   const files = await prisma.file.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
-    select: { id: true, path: true, mime: true },
+    select: { id: true, filename: true, path: true, mime: true },
   });
 
   if (files.length === 0) {
@@ -189,18 +160,6 @@ export async function POST() {
     });
     return NextResponse.json({ status: "empty", message: "No files uploaded" }, { status: 400 });
   }
-    async function extractPdfTextViaPdfParse(absPath: string) {
-      const buf = await fs.readFile(absPath);
-      try {
-        const mod = await import('pdf-parse');
-        const parser = (mod && (mod as any).default) ? (mod as any).default : mod;
-        const data = await parser(buf);
-        return (data && data.text) ? String(data.text) : '';
-      } catch (err) {
-        console.error('pdf-parse failed:', err);
-        throw err;
-      }
-    }
 
   const build = await (prisma as any).knowledgeBaseBuild.create({
     data: {
@@ -218,6 +177,7 @@ export async function POST() {
 
   let processed = 0;
   let failed = 0;
+
   for (const file of files) {
     const job = await prisma.knowledgeBaseJob.create({
       data: {
@@ -229,21 +189,227 @@ export async function POST() {
       select: { id: true },
     });
 
-        return await extractPdfTextViaPdfParse(absPath);
-      const relOrAbsPath = (file.path || "").replace(/\\/g, path.sep);
-      const absPath = path.isAbsolute(relOrAbsPath) ? relOrAbsPath : path.join(process.cwd(), relOrAbsPath);
-      let text = "";
+    try {
+      const storagePath = (file.path || '').replace(/\\/g, '/');
+      console.log('[KB BUILD] userId:', userId, 'fileId:', file.id, 'storagePath:', storagePath);
       try {
-        text = await readTextFromFile(absPath, file.mime || "");
+        if (!storagePath || typeof storagePath !== 'string') {
+          console.warn('[KB BUILD] Skipping file (missing storagePath):', { fileId: file.id });
+          await prisma.knowledgeBaseJob.update({ where: { id: job.id }, data: { status: 'failed', error: 'Missing storagePath' } as any });
+          failed += 1;
+          continue;
+        }
       } catch (err) {
-        console.error(`Error reading file for KB build:`, {
-          fileId: file.id,
-          absPath,
-          mime: file.mime,
-          error: err instanceof Error ? err.message : err
-        });
-        throw err;
+        console.error('[KB BUILD] Error updating job for missing storagePath:', err);
       }
+
+      if (!storagePath || typeof storagePath !== 'string') {
+        console.warn('[KB BUILD] Skipping file (missing storagePath):', { fileId: file.id });
+        await prisma.knowledgeBaseJob.update({ where: { id: job.id }, data: { status: 'failed', error: 'Missing storagePath' } as any });
+        failed += 1;
+        continue;
+      }
+
+      // Try the canonical key (used by our upload endpoint) first, then fall back.
+      const filename = String((file as any).filename || '').replace(/\\/g, '/').split('/').pop() || '';
+      const basename = storagePath.split('/').pop() || '';
+
+      const candidatePaths = new Set<string>();
+      if (filename) candidatePaths.add(`knowledge-base/${userId}/${filename}`);
+      if (storagePath && isSafeStorageKey(storagePath)) candidatePaths.add(storagePath);
+      if (basename) candidatePaths.add(`knowledge-base/${userId}/${basename}`);
+      if (basename) candidatePaths.add(`uploads/${userId}/${basename}`);
+      // Legacy pattern: objects stored without a folder prefix.
+      if (filename) candidatePaths.add(`${userId}/${filename}`);
+      if (basename) candidatePaths.add(`${userId}/${basename}`);
+      // Bucket screenshot indicates some objects may be nested under <userId>/knowledge-base/<userId>/...
+      if (filename) candidatePaths.add(`${userId}/knowledge-base/${userId}/${filename}`);
+      if (basename) candidatePaths.add(`${userId}/knowledge-base/${userId}/${basename}`);
+      // Also try <userId>/knowledge-base/<filename> (less common, but safe).
+      if (filename) candidatePaths.add(`${userId}/knowledge-base/${filename}`);
+      if (basename) candidatePaths.add(`${userId}/knowledge-base/${basename}`);
+
+      let downloaded = false;
+      let buf: Buffer | null = null;
+
+      const downloadErrors: string[] = [];
+      const bucketsToTry = getBucketsToTry();
+      for (const candidate of candidatePaths) {
+        const key = normalizeKey(candidate);
+        if (!isSafeStorageKey(key)) {
+          downloadErrors.push(`candidate=${candidate} error=unsafe_path`);
+          continue;
+        }
+
+        for (const bucket of bucketsToTry) {
+          try {
+            console.log('[KB BUILD] attempting download candidate:', { bucket, key, fileId: file.id });
+            const { data, error } = await supabase.storage.from(bucket).download(key);
+            if (error || !data) {
+              let detail = (error as any)?.message ?? "";
+              try {
+                const original = (error as any)?.originalError;
+                if (original && typeof original.status === "number") {
+                  const status = original.status;
+                  let bodyText = "";
+                  try {
+                    if (typeof original.text === "function") bodyText = await original.text();
+                  } catch {
+                    bodyText = "";
+                  }
+                  detail = `${detail || "storage_error"} status=${status}${bodyText ? ` body=${bodyText}` : ""}`;
+                }
+              } catch {
+                // ignore
+              }
+
+              downloadErrors.push(`candidate=${bucket}:${key} error=${detail || JSON.stringify(error ?? {})}`);
+              console.error('[KB BUILD] Supabase download failed for candidate:', { bucket, key, fileId: file.id, error });
+              continue;
+            }
+
+            try {
+              if (typeof (data as any).arrayBuffer === 'function') {
+                const arrayBuffer = await (data as any).arrayBuffer();
+                buf = Buffer.from(arrayBuffer);
+              } else if (typeof (data as any).stream === 'function') {
+                const stream = (data as any).stream();
+                const chunks: Buffer[] = [];
+                for await (const chunk of stream) {
+                  chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                }
+                buf = Buffer.concat(chunks);
+              } else if (data instanceof Uint8Array) {
+                buf = Buffer.from(data);
+              } else {
+                const arr = await (new Response(data as any)).arrayBuffer();
+                buf = Buffer.from(arr);
+              }
+              if (buf) {
+                downloaded = true;
+                console.log('[KB BUILD] Downloaded file candidate:', { fileId: file.id, bucket, candidate: key, size: buf.byteLength });
+
+                // Prefer healing into our configured canonical location.
+                const canonicalKey = normalizeKey(`knowledge-base/${userId}/${filename || (basename || '')}`);
+                if (isSafeStorageKey(canonicalKey) && (bucket !== SUPABASE_STORAGE_BUCKET || key !== canonicalKey)) {
+                  try {
+                    const { error: upErr } = await supabase.storage
+                      .from(SUPABASE_STORAGE_BUCKET)
+                      .upload(canonicalKey, buf, { upsert: false, contentType: file.mime || 'application/octet-stream' });
+                    if (!upErr) {
+                      console.log('[KB BUILD] Healed object into canonical key:', { fileId: file.id, canonicalKey });
+                    }
+                  } catch {
+                    // ignore healing failures
+                  }
+                }
+
+                // If DB path was wrong, update it to the canonical key (preferred) or the successful key.
+                const preferredPath = isSafeStorageKey(canonicalKey) ? canonicalKey : key;
+                if (preferredPath !== storagePath) {
+                  try {
+                    if (typeof (prisma as any)?.file?.update === 'function') {
+                      await (prisma as any).file.update({ where: { id: file.id }, data: { path: preferredPath } });
+                      console.log('[KB BUILD] Updated DB storage path for file', file.id, '->', preferredPath);
+                    }
+                  } catch (uErr) {
+                    console.error('[KB BUILD] Failed to update DB path for', file.id, uErr);
+                  }
+                }
+                break;
+              }
+            } catch (innerErr) {
+              console.error('[KB BUILD] Could not convert downloaded data to buffer for candidate:', { bucket, key, fileId: file.id, err: innerErr });
+              continue;
+            }
+          } catch (err) {
+            console.warn('[KB BUILD] Error downloading candidate from Supabase:', { fileId: file.id, bucket, key, err });
+            continue;
+          }
+        }
+
+        if (downloaded) break;
+      }
+
+      if (!downloaded || !buf) {
+        // Legacy fallback: attempt to read from local filesystem (dev / legacy uploads) and re-upload.
+        const legacyBuf = await tryReadLegacyFileBuffer(storagePath);
+        if (legacyBuf && !buf) {
+          const filename = String((file as any).filename || '').replace(/\\/g, '/').split('/').pop() || '';
+          const canonicalKey = normalizeKey(`knowledge-base/${userId}/${filename || (storagePath.split('/').pop() || '')}`);
+
+          if (filename && isSafeStorageKey(canonicalKey)) {
+            try {
+              const { error: upErr } = await supabase.storage
+                .from(SUPABASE_STORAGE_BUCKET)
+                .upload(canonicalKey, legacyBuf, {
+                  upsert: true,
+                  contentType: file.mime || "application/octet-stream",
+                });
+
+              if (!upErr) {
+                buf = legacyBuf;
+                downloaded = true;
+                try {
+                  if (typeof (prisma as any)?.file?.update === 'function') {
+                    await (prisma as any).file.update({ where: { id: file.id }, data: { path: canonicalKey } });
+                  }
+                } catch {
+                  // ignore
+                }
+                console.log('[KB BUILD] Re-uploaded legacy file to Supabase:', { fileId: file.id, canonicalKey, size: buf.byteLength });
+              } else {
+                downloadErrors.push(`legacy_reupload_failed error=${upErr.message || JSON.stringify(upErr)}`);
+              }
+            } catch (e) {
+              downloadErrors.push(`legacy_reupload_failed error=${e instanceof Error ? e.message : String(e)}`);
+            }
+          } else {
+            downloadErrors.push('legacy_read_ok_but_no_canonical_key');
+          }
+        }
+
+        if (downloaded && buf) {
+          // continue
+        } else {
+        // mark job failed but continue
+        try {
+          await prisma.knowledgeBaseJob.update({
+            where: { id: job.id },
+            data: {
+              status: 'failed',
+              error:
+                downloadErrors.length > 0
+                  ? `Failed to download file. ${downloadErrors.slice(0, 4).join(' | ')}`
+                  : 'Failed to download file',
+            } as any,
+          });
+        } catch (err) {
+          console.error('[KB BUILD] Error updating job for failed download:', err);
+        }
+        failed += 1;
+        continue;
+        }
+      }
+
+      // Parse in-memory
+      let text = '';
+      let pdfParsed = false;
+      try {
+        text = await readTextFromBuffer(buf, file.mime || '');
+        if ((file.mime || '').includes('pdf')) pdfParsed = true;
+        console.log('[KB BUILD] Parsed file:', { fileId: file.id, pdfParsed });
+      } catch (err) {
+        console.error('[KB BUILD] Error parsing file:', { fileId: file.id, storagePath, error: err });
+        try {
+          await prisma.knowledgeBaseJob.update({ where: { id: job.id }, data: { status: 'failed', error: String(err) } as any });
+        } catch (dbErr) {
+          console.error('[KB BUILD] Error updating job for failed parse:', dbErr);
+        }
+        failed += 1;
+        continue;
+      }
+
       const chunks = splitTextIntoChunks(text).filter((c) => c.trim().length > 0);
 
       const chunkRows = chunks.map((t, idx) => {
@@ -253,86 +419,65 @@ export async function POST() {
 
       await prisma.$transaction([
         prisma.chunk.deleteMany({ where: { fileId: file.id } }),
-        prisma.chunk.createMany({
-          data: chunkRows,
-        }),
-        prisma.knowledgeBaseJob.update({
-          where: { id: job.id },
-          data: { status: "done", error: null },
-        }),
+        prisma.chunk.createMany({ data: chunkRows }),
+        prisma.knowledgeBaseJob.update({ where: { id: job.id }, data: { status: 'done', error: null } }),
       ]);
 
-      // Optional vector indexing for RAG (Qdrant + embeddings provider).
-      // If not configured, this will be a no-op.
       try {
         await indexChunksInQdrant({
           userId,
           chunks: chunkRows.map((c) => ({ id: c.id, fileId: c.fileId, text: c.text })),
         });
       } catch (err) {
-        console.error(`Error indexing chunks in Qdrant:`, err);
-        // Ignore vector indexing failures; DB chunks are still usable via FTS retrieval.
+        console.error('[KB BUILD] Error indexing chunks in Qdrant:', err);
       }
 
       processed += 1;
     } catch (e) {
-      console.error(`KB build failed for file`, file.id, e);
+      console.error('[KB BUILD] KB build failed for file', file.id, e);
       failed += 1;
-      await prisma.knowledgeBaseJob.update({
-        where: { id: job.id },
-        data: {
-          status: "failed",
-          error: e instanceof Error ? e.message : "Unknown error",
-        },
-      });
+      await prisma.knowledgeBaseJob.update({ where: { id: job.id }, data: { status: 'failed', error: e instanceof Error ? e.message : String(e) } as any });
     }
   }
 
-  const finalStatus = processed > 0 ? "ready" : "empty";
-  const buildStatus = processed > 0 ? "ready" : "failed";
+  const finalStatus = processed > 0 ? 'ready' : 'empty';
+  const buildStatus = processed > 0 ? 'ready' : 'failed';
   const completedAt = new Date();
 
-  await (prisma as any).knowledgeBaseBuild.update({
-    where: { id: build.id },
-    data: {
-      status: buildStatus,
-      completedAt,
-      processed,
-      failed,
-      error:
-        processed > 0
-          ? null
-          : "No files could be processed. Check KnowledgeBaseJob errors for details.",
-    },
-  });
+  await (prisma as any).knowledgeBaseBuild.update({ where: { id: build.id }, data: { status: buildStatus, completedAt, processed, failed, error: processed > 0 ? null : 'No files could be processed. Check KnowledgeBaseJob errors for details.' } });
 
-  await prisma.knowledgeBaseStatus.upsert({
-    where: { userId },
-    update: { status: finalStatus, lastBuildId: build.id } as any,
-    create: { userId, status: finalStatus, lastBuildId: build.id } as any,
-  });
+  await prisma.knowledgeBaseStatus.upsert({ where: { userId }, update: { status: finalStatus, lastBuildId: build.id } as any, create: { userId, status: finalStatus, lastBuildId: build.id } as any });
 
   if (processed === 0) {
-    // Surface a hard failure so the UI can show a toast and the user understands why
-    // KB stays empty and the dashboard success rate remains 0.
+    let failedJobErrors: Array<{ fileId: string; error: string | null }> = []
+    try {
+      const rows = await prisma.knowledgeBaseJob.findMany({
+        where: { buildId: build.id, status: 'failed' },
+        orderBy: { createdAt: 'asc' },
+        select: { fileId: true, error: true },
+        take: 10,
+      })
+      failedJobErrors = rows.map((r) => ({ fileId: r.fileId, error: r.error ? String(r.error) : null }))
+    } catch (e) {
+      // ignore
+    }
+
+    const message =
+      failedJobErrors[0]?.error ||
+      'No files could be processed. Check KnowledgeBaseJob errors for details.'
+
     return NextResponse.json(
       {
-        error: "Knowledge base build failed",
-        message: "No files could be processed. Check the latest build errors in the dashboard.",
+        error: 'Knowledge base build failed',
+        message,
         buildId: build.id,
         processed,
         failed,
+        failedJobErrors,
       },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({
-    status: finalStatus,
-    message: "Knowledge base built successfully",
-    buildId: build.id,
-    completedAt: completedAt.toISOString(),
-    processed,
-    failed,
-  });
+  return NextResponse.json({ status: finalStatus, message: 'Knowledge base built successfully', buildId: build.id, completedAt: completedAt.toISOString(), processed, failed });
 }

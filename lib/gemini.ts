@@ -1,6 +1,11 @@
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-export async function callGemini(model: string, body: unknown, apiKey?: string) {
+export async function callGemini(
+  model: string,
+  body: unknown,
+  apiKey?: string,
+  opts?: { signal?: AbortSignal },
+) {
   const { GEMINI_API_KEY } = await import("./env")
   const key = (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ?? GEMINI_API_KEY
 
@@ -16,6 +21,7 @@ export async function callGemini(model: string, body: unknown, apiKey?: string) 
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: opts?.signal,
   })
 
   if (!res.ok) {

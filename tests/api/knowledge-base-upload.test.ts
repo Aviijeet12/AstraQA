@@ -14,13 +14,27 @@ describe("POST /api/knowledge-base/upload", () => {
     }));
 
     vi.doMock("@/lib/prisma", () => ({
-      prisma: { file: { create: vi.fn() } },
+      prisma: {
+        user: {
+          findUnique: vi.fn(async () => null),
+          create: vi.fn(async () => ({ id: "u1" })),
+        },
+        file: {
+          findMany: vi.fn(async () => []),
+          create: vi.fn(),
+        },
+      },
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        mkdir: vi.fn(),
-        writeFile: vi.fn(),
+    vi.doMock("@/lib/supabase", () => ({
+      SUPABASE_STORAGE_BUCKET: "astraA",
+      supabase: {
+        storage: {
+          from: vi.fn(() => ({
+            upload: vi.fn(async () => ({ data: { path: "x" }, error: null })),
+            download: vi.fn(async () => ({ data: new Blob(["x"]), error: null })),
+          })),
+        },
       },
     }));
 
@@ -40,13 +54,27 @@ describe("POST /api/knowledge-base/upload", () => {
     }));
 
     vi.doMock("@/lib/prisma", () => ({
-      prisma: { file: { create: vi.fn() } },
+      prisma: {
+        user: {
+          findUnique: vi.fn(async () => ({ id: "u1" })),
+          create: vi.fn(async () => ({ id: "u1" })),
+        },
+        file: {
+          findMany: vi.fn(async () => []),
+          create: vi.fn(),
+        },
+      },
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        mkdir: vi.fn(),
-        writeFile: vi.fn(),
+    vi.doMock("@/lib/supabase", () => ({
+      SUPABASE_STORAGE_BUCKET: "astraA",
+      supabase: {
+        storage: {
+          from: vi.fn(() => ({
+            upload: vi.fn(async () => ({ data: { path: "x" }, error: null })),
+            download: vi.fn(async () => ({ data: new Blob(["x"]), error: null })),
+          })),
+        },
       },
     }));
 
@@ -74,21 +102,37 @@ describe("POST /api/knowledge-base/upload", () => {
       createdAt: new Date("2025-01-01T00:00:00.000Z"),
     }));
 
-    const mkdir = vi.fn(async () => undefined);
-    const writeFile = vi.fn(async () => undefined);
+    const prismaUserFindUnique = vi.fn(async () => ({ id: "u1" }));
+    const prismaUserCreate = vi.fn(async () => ({ id: "u1" }));
+    const prismaFileFindMany = vi.fn(async () => []);
+    const supabaseUpload = vi.fn(async () => ({ data: { path: "knowledge-base/u1/doc.md" }, error: null }));
 
     vi.doMock("@/lib/require-user", () => ({
       requireUserId: vi.fn(async () => ({ userId: "u1" })),
     }));
 
     vi.doMock("@/lib/prisma", () => ({
-      prisma: { file: { create: prismaFileCreate } },
+      prisma: {
+        user: {
+          findUnique: prismaUserFindUnique,
+          create: prismaUserCreate,
+        },
+        file: {
+          findMany: prismaFileFindMany,
+          create: prismaFileCreate,
+        },
+      },
     }));
 
-    vi.doMock("fs", () => ({
-      promises: {
-        mkdir,
-        writeFile,
+    vi.doMock("@/lib/supabase", () => ({
+      SUPABASE_STORAGE_BUCKET: "astraA",
+      supabase: {
+        storage: {
+          from: vi.fn(() => ({
+            upload: supabaseUpload,
+            download: vi.fn(async () => ({ data: new Blob(["x"]), error: null })),
+          })),
+        },
       },
     }));
 
@@ -118,8 +162,9 @@ describe("POST /api/knowledge-base/upload", () => {
       uploadedAt: "2025-01-01T00:00:00.000Z",
     });
 
-    expect(mkdir).toHaveBeenCalled();
-    expect(writeFile).toHaveBeenCalled();
+    expect(prismaUserFindUnique).toHaveBeenCalledTimes(1);
+    expect(prismaFileFindMany).toHaveBeenCalledTimes(1);
+    expect(supabaseUpload).toHaveBeenCalledTimes(1);
     expect(prismaFileCreate).toHaveBeenCalledTimes(1);
   });
 });

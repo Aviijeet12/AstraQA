@@ -1,6 +1,11 @@
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
-export async function callAnthropic(model: string, body: unknown, apiKey?: string) {
+export async function callAnthropic(
+  model: string,
+  body: unknown,
+  apiKey?: string,
+  opts?: { signal?: AbortSignal },
+) {
   const { ANTHROPIC_API_KEY } = await import("./env")
   const key =
     (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ?? ANTHROPIC_API_KEY
@@ -17,6 +22,7 @@ export async function callAnthropic(model: string, body: unknown, apiKey?: strin
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({ model, ...(body || {}) }),
+    signal: opts?.signal,
   })
 
   if (!res.ok) {

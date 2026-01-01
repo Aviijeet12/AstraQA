@@ -24,6 +24,27 @@ const clampInt = (value: unknown, min: number, max: number, fallback: number) =>
   return Math.max(min, Math.min(max, Math.floor(n)));
 };
 
+const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+const withTimeout = async <T>(
+  fn: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> => {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fn(controller.signal);
+  } catch (e) {
+    if (e instanceof Error && (e as any).name === "AbortError") {
+      throw new Error(`${label} timed out after ${ms}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+};
+
 const extractJson = (text: string) => {
   // Some chat models include reasoning blocks; strip them to improve JSON extraction.
   const withoutThink = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
@@ -101,16 +122,22 @@ export async function POST(req: Request) {
 
   const desiredCount = clampInt(count, 6, 12, 8);
 
-  const ragTopK = Math.max(8, Math.min(20, desiredCount * 2));
+  // Keep retrieval small to reduce end-to-end latency and token load.
+  const ragTopK = Math.max(6, Math.min(10, desiredCount));
   const rag = await retrieveChunks({ userId, query: prompt, topK: ragTopK });
-  const context = rag.chunks
+
+  // Truncate individual chunks and overall context to keep prompts snappy.
+  const MAX_CHUNK_CHARS = 1200;
+  const MAX_CONTEXT_CHARS = 14_000;
+  let context = rag.chunks
     .map((c, i) =>
       [
         `[KB_CHUNK_${i + 1} id=${c.chunkId} score=${c.score.toFixed(3)}]`,
-        c.text,
+        truncate(c.text, MAX_CHUNK_CHARS),
       ].join("\n"),
     )
     .join("\n\n---\n\n");
+  if (context.length > MAX_CONTEXT_CHARS) context = context.slice(0, MAX_CONTEXT_CHARS) + "…";
 
   const requestApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
   const effectiveGeminiKey = GEMINI_API_KEY || requestApiKey;
@@ -142,7 +169,7 @@ export async function POST(req: Request) {
 
   // Gemini tends to be reliable with JSON; keep it strict.
   // HF may occasionally under-produce; accept partial-but-valid results.
-  const minValid = llmMode === "huggingface" ? 1 : 6
+  const minValid = llmMode === "huggingface" ? 1 : Math.min(6, desiredCount)
 
   if (llmMode === "none") {
     return NextResponse.json(
@@ -167,22 +194,28 @@ export async function POST(req: Request) {
   const runLLM = async (userText: string) => {
     if (llmMode === "anthropic") {
       const model = ANTHROPIC_MODEL || "claude-3-5-haiku-latest"
-      const resp = await callAnthropic(
-        model,
-        {
-          max_tokens: 2400,
-          temperature: 0.2,
-          messages: [
+      const resp = await withTimeout(
+        (signal) =>
+          callAnthropic(
+            model,
             {
-              role: "user",
-              content:
-                instruction +
-                `\n\nUser prompt:\n${userText}` +
-                `\n\nKnowledge Base Context (top matches):\n${context || "(no matches found)"}`,
+              max_tokens: 2000,
+              temperature: 0.2,
+              messages: [
+                {
+                  role: "user",
+                  content:
+                    instruction +
+                    `\n\nUser prompt:\n${userText}` +
+                    `\n\nKnowledge Base Context (top matches):\n${context || "(no matches found)"}`,
+                },
+              ],
             },
-          ],
-        },
-        effectiveAnthropicKey,
+            effectiveAnthropicKey,
+            { signal },
+          ),
+        30_000,
+        "Anthropic",
       )
 
       const blocks = (resp as any)?.content
@@ -198,25 +231,33 @@ export async function POST(req: Request) {
     }
 
     if (llmMode === "gemini") {
-      const resp = await callGemini(
-        "gemini-1.5-pro",
-        {
-          contents: [
+      // Flash is significantly faster and is usually good enough for structured JSON.
+      const geminiModel = "gemini-1.5-flash";
+      const resp = await withTimeout(
+        (signal) =>
+          callGemini(
+            geminiModel,
             {
-              role: "user",
-              parts: [
-                { text: instruction },
-                { text: `User prompt:\n${userText}` },
-                { text: `Knowledge Base Context (top matches):\n${context || "(no matches found)"}` },
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: instruction },
+                    { text: `User prompt:\n${userText}` },
+                    { text: `Knowledge Base Context (top matches):\n${context || "(no matches found)"}` },
+                  ],
+                },
               ],
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 2200,
+              },
             },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 3200,
-          },
-        },
-        effectiveGeminiKey,
+            effectiveGeminiKey,
+            { signal },
+          ),
+        25_000,
+        "Gemini",
       );
 
       return (
@@ -252,11 +293,21 @@ export async function POST(req: Request) {
     }
 
     const tryModel = async (modelId: string, text: string) => {
-      const resp = await callHuggingFace(modelId, {
-        messages: [{ role: "user", content: makePrompt(text) }],
-        temperature: 0.2,
-        max_tokens: 2400,
-      })
+      const resp = await withTimeout(
+        (signal) =>
+          callHuggingFace(
+            modelId,
+            {
+              messages: [{ role: "user", content: makePrompt(text) }],
+              temperature: 0.2,
+              max_tokens: 1800,
+            },
+            undefined,
+            { signal, maxAttempts: 2 },
+          ),
+        25_000,
+        "HuggingFace",
+      )
       return extractText(resp)
     }
 
