@@ -5,14 +5,16 @@ import { hash } from "bcryptjs";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { email, password, name } = body;
+    const { email: rawEmail, password, name } = body;
 
-    if (!email || !password) {
+    if (!rawEmail || !password) {
       return NextResponse.json(
         { error: "Email and password are required" },
         { status: 400 }
       );
     }
+
+    const email = rawEmail.trim().toLowerCase();
 
     const exists = await prisma.user.findUnique({
       where: { email },

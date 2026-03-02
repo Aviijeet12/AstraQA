@@ -27,7 +27,7 @@ export default function SettingsPage() {
   const { toast } = useToast()
 
   const [llmProvider, setLlmProvider] = useState("gemini")
-  const [vectorDb, setVectorDb] = useState("faiss")
+  const [vectorDb, setVectorDb] = useState("qdrant")
   const [defaultBrowser, setDefaultBrowser] = useState("chrome")
   const [implicitWaitSeconds, setImplicitWaitSeconds] = useState(10)
   const [headless, setHeadless] = useState(false)
@@ -204,7 +204,7 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Test generation defaults to Hugging Face using server env var <span className="font-mono">HF_API_KEY</span>. To use Gemini instead, set <span className="font-mono">GEMINI_API_KEY</span> or provide an API key.
+                  Test generation uses Google Gemini as the primary LLM. Falls back to Anthropic or Hugging Face if Gemini is unavailable.
                 </p>
               </div>
               <div className="space-y-2">
@@ -236,7 +236,7 @@ export default function SettingsPage() {
                 onChange={(e) => setApiKey(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Stored locally for convenience. Test generation uses server env <span className="font-mono">HF_API_KEY</span> by default, and will switch to Gemini when <span className="font-mono">GEMINI_API_KEY</span> is set or you provide an API key.
+                Stored locally for convenience. Sent with each request as a fallback when no server-side key is configured.
               </p>
             </div>
 

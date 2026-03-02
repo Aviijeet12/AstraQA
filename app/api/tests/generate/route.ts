@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { retrieveChunks } from "@/lib/rag";
-import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL, GEMINI_API_KEY, HF_API_KEY } from "@/lib/env";
+import { ANTHROPIC_API_KEY, ANTHROPIC_MODEL, GEMINI_API_KEY, HF_API_KEY, HF_MODEL_NAME, HF_FALLBACK_MODEL_NAME, HF_MAX_TOKENS } from "@/lib/env";
 import { callGemini } from "@/lib/gemini";
 import { callAnthropic } from "@/lib/anthropic";
 import { callHuggingFace } from "@/lib/hf";
@@ -152,19 +152,20 @@ export async function POST(req: Request) {
   const canGemini = Boolean(effectiveGeminiKey)
   const canHuggingFace = Boolean(HF_API_KEY)
 
+  // Priority: HuggingFace (Llama primary) → Gemini → Anthropic
   const llmMode: "anthropic" | "gemini" | "huggingface" | "none" =
     preferred === "anthropic" && canAnthropic
       ? "anthropic"
       : preferred === "gemini" && canGemini
         ? "gemini"
-        : preferred === "openai"
-          ? "none"
-          : canGemini
-            ? "gemini"
-            : canAnthropic
-              ? "anthropic"
-              : canHuggingFace
-                ? "huggingface"
+        : preferred === "huggingface" && canHuggingFace
+          ? "huggingface"
+          : canHuggingFace
+            ? "huggingface"
+            : canGemini
+              ? "gemini"
+              : canAnthropic
+                ? "anthropic"
                 : "none";
 
   // Gemini tends to be reliable with JSON; keep it strict.
@@ -231,8 +232,8 @@ export async function POST(req: Request) {
     }
 
     if (llmMode === "gemini") {
-      // Flash is significantly faster and is usually good enough for structured JSON.
-      const geminiModel = "gemini-1.5-flash";
+      // Gemini 2.0 Flash is fast, cheap, and reliable for structured JSON output.
+      const geminiModel = "gemini-2.0-flash";
       const resp = await withTimeout(
         (signal) =>
           callGemini(
@@ -274,7 +275,7 @@ export async function POST(req: Request) {
     // Try multiple models to reduce intermittent failures / non-JSON generations.
     // These are the models exposed via HF Router for the currently configured HF token.
     // (We intentionally keep this list small and reliable.)
-    const hfModels = ["HuggingFaceTB/SmolLM3-3B", "katanemo/Arch-Router-1.5B"]
+    const hfModels = [HF_MODEL_NAME, HF_FALLBACK_MODEL_NAME]
 
     const makePrompt = (text: string) =>
       `${instruction}\n\n` +
@@ -300,7 +301,7 @@ export async function POST(req: Request) {
             {
               messages: [{ role: "user", content: makePrompt(text) }],
               temperature: 0.2,
-              max_tokens: 1800,
+              max_tokens: HF_MAX_TOKENS,
             },
             undefined,
             { signal, maxAttempts: 2 },
@@ -343,6 +344,125 @@ export async function POST(req: Request) {
   let rawText = "";
   try {
     rawText = await runLLM(prompt);
+  } catch (primaryErr: any) {
+    // If the primary LLM failed (e.g. quota exceeded), try fallback providers
+    console.warn(`[TEST GEN] Primary LLM (${llmMode}) failed:`, primaryErr?.message);
+
+    const fallbackOrder: typeof llmMode[] = ["gemini", "anthropic", "huggingface"];
+    let fell = false;
+    for (const fb of fallbackOrder) {
+      if (fb === llmMode) continue; // skip the one that already failed
+      const canUse =
+        fb === "gemini" ? canGemini : fb === "anthropic" ? canAnthropic : canHuggingFace;
+      if (!canUse) continue;
+
+      try {
+        console.log(`[TEST GEN] Trying fallback: ${fb}`);
+        // Temporarily override llmMode by calling the right provider directly
+        if (fb === "gemini") {
+          rawText = await withTimeout(
+            (signal) =>
+              callGemini(
+                "gemini-2.0-flash",
+                {
+                  contents: [
+                    {
+                      role: "user",
+                      parts: [
+                        { text: instruction },
+                        { text: `User prompt:\n${prompt}` },
+                        { text: `Knowledge Base Context (top matches):\n${context || "(no matches found)"}` },
+                      ],
+                    },
+                  ],
+                  generationConfig: { temperature: 0.2, maxOutputTokens: 2200 },
+                },
+                effectiveGeminiKey,
+                { signal },
+              ).then(
+                (r: any) =>
+                  r?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || "",
+              ),
+            25_000,
+            "Gemini-fallback",
+          );
+        } else if (fb === "anthropic") {
+          rawText = await withTimeout(
+            (signal) =>
+              callAnthropic(
+                ANTHROPIC_MODEL || "claude-3-5-haiku-latest",
+                {
+                  max_tokens: 2000,
+                  temperature: 0.2,
+                  messages: [
+                    {
+                      role: "user",
+                      content:
+                        instruction +
+                        `\n\nUser prompt:\n${prompt}` +
+                        `\n\nKnowledge Base Context (top matches):\n${context || "(no matches found)"}`,
+                    },
+                  ],
+                },
+                effectiveAnthropicKey,
+                { signal },
+              ).then((resp: any) => {
+                const blocks = resp?.content;
+                if (Array.isArray(blocks))
+                  return blocks.map((b: any) => (typeof b?.text === "string" ? b.text : "")).filter(Boolean).join("\n");
+                return typeof resp?.content?.[0]?.text === "string" ? resp.content[0].text : JSON.stringify(resp);
+              }),
+            30_000,
+            "Anthropic-fallback",
+          );
+        } else {
+          rawText = await withTimeout(
+            (signal) =>
+              callHuggingFace(
+                HF_MODEL_NAME,
+                {
+                  messages: [
+                    {
+                      role: "user",
+                      content:
+                        `${instruction}\n\nUser prompt:\n${prompt}\n\nKnowledge Base Context (top matches):\n${context || "(no matches found)"}\n\nOutput MUST start with '[' and end with ']'. Return ONLY the JSON array.`,
+                    },
+                  ],
+                  temperature: 0.2,
+                  max_tokens: HF_MAX_TOKENS,
+                },
+                undefined,
+                { signal, maxAttempts: 2 },
+              ).then((resp: any) => {
+                const content = resp?.choices?.[0]?.message?.content;
+                if (typeof content === "string") return content;
+                const text = resp?.choices?.[0]?.text;
+                if (typeof text === "string") return text;
+                return typeof resp === "string" ? resp : JSON.stringify(resp);
+              }),
+            25_000,
+            "HuggingFace-fallback",
+          );
+        }
+        fell = true;
+        break;
+      } catch (fbErr: any) {
+        console.warn(`[TEST GEN] Fallback ${fb} also failed:`, fbErr?.message);
+      }
+    }
+
+    if (!fell) {
+      return NextResponse.json(
+        {
+          error: "LLM generation failed",
+          message: primaryErr instanceof Error ? primaryErr.message : "All LLM providers failed",
+        },
+        { status: 502 },
+      );
+    }
+  }
+
+  try {
     const parsed1 = JSON.parse(extractJson(rawText));
     const v1 = validateAndNormalize(parsed1, { count: desiredCount, base, suffix, minValid });
     if (v1.ok) {

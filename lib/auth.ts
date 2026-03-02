@@ -2,10 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "./prisma";
 import { verify } from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.warn("[auth] JWT_SECRET is not configured. Legacy JWT auth will not work.");
+}
 
 export async function auth(req: Request) {
   try {
+    if (!JWT_SECRET) return null;
+
     const token = req.headers.get("authorization")?.replace("Bearer ", "");
     if (!token) {
       return null;

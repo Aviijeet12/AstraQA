@@ -1,6 +1,17 @@
 import { prisma } from "@/lib/prisma"
 import { embedTexts, getEmbeddingProvider } from "@/lib/embeddings"
 import { ensureCollection, isQdrantConfigured, searchPoints, upsertPoints } from "@/lib/qdrant"
+import { createHash } from "crypto"
+
+/**
+ * Convert an arbitrary string ID into a deterministic UUID (v4-format).
+ * Qdrant requires point IDs to be either UUIDs or unsigned 64-bit integers.
+ */
+function toQdrantUuid(id: string): string {
+  const hash = createHash("md5").update(id).digest("hex")
+  // Format as UUID: 8-4-4-4-12
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`
+}
 
 export type RetrievedChunk = {
   chunkId: string
@@ -120,7 +131,7 @@ export async function indexChunksInQdrant(opts: {
   await ensureCollection(dim)
 
   const points = opts.chunks.map((c, idx) => ({
-    id: c.id,
+    id: toQdrantUuid(c.id),
     vector: embeddings[idx] || [],
     payload: {
       chunkId: c.id,

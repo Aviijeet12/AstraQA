@@ -1,8 +1,9 @@
-import { HF_API_KEY, HF_EMBEDDINGS_MODEL, OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL } from "./env"
+import { GEMINI_API_KEY, HF_API_KEY, HF_EMBEDDINGS_MODEL, OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL } from "./env"
 
-export type EmbeddingProvider = "ollama" | "huggingface" | "none"
+export type EmbeddingProvider = "gemini" | "ollama" | "huggingface" | "none"
 
 export function getEmbeddingProvider(): EmbeddingProvider {
+  if (GEMINI_API_KEY) return "gemini"
   if (OLLAMA_BASE_URL) return "ollama"
   if (HF_API_KEY) return "huggingface"
   return "none"
@@ -12,8 +13,38 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   const provider = getEmbeddingProvider()
   if (provider === "none") {
     throw new Error(
-      "No embedding provider configured. Set OLLAMA_BASE_URL (recommended) or HF_API_KEY to enable vector embeddings."
+      "No embedding provider configured. Set GEMINI_API_KEY (recommended), OLLAMA_BASE_URL, or HF_API_KEY to enable vector embeddings."
     )
+  }
+
+  if (provider === "gemini") {
+    // Gemini Embedding API — supports batch embedding via batchEmbedContents
+    const model = "text-embedding-004"
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${encodeURIComponent(GEMINI_API_KEY!)}`
+
+    const requests = texts.map((text) => ({
+      model: `models/${model}`,
+      content: { parts: [{ text }] },
+      taskType: "RETRIEVAL_DOCUMENT",
+    }))
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests }),
+    })
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "")
+      throw new Error(`Gemini embeddings failed: ${res.status} ${detail}`)
+    }
+
+    const data = (await res.json()) as { embeddings?: Array<{ values: number[] }> }
+    if (!data.embeddings || !Array.isArray(data.embeddings)) {
+      throw new Error("Gemini embeddings response missing 'embeddings' array")
+    }
+
+    return data.embeddings.map((e) => e.values)
   }
 
   if (provider === "ollama") {

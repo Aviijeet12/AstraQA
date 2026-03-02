@@ -18,8 +18,9 @@ const splitTextIntoChunks = (text: string, maxChars = 1500, overlap = 200) => {
     const slice = text.slice(start, end);
     chunks.push(slice);
     if (end >= text.length) break;
-    start = end - overlap;
-    if (start < 0) start = 0;
+    const next = end - overlap;
+    // Guard against infinite loop when overlap >= maxChars
+    start = next <= start ? start + 1 : next;
   }
   return chunks;
 };
@@ -35,24 +36,14 @@ async function readTextFromBuffer(buf: Buffer, mime: string) {
     }
   }
 
-  // PDF - use `pdf-parse` to avoid bundler issues with pdfjs deep imports
+  // PDF - use `pdf-parse` v1.x (simple Node wrapper, no worker needed)
+  // Import from lib/pdf-parse.js directly to bypass the index.js test-file check.
   if (mime.includes("pdf")) {
     try {
-      const mod = await import("pdf-parse");
-      const PDFParse = (mod as any).PDFParse;
-      if (typeof PDFParse !== "function") {
-        throw new Error(`pdf-parse: missing PDFParse export (keys=${Object.keys(mod as any).join(",")})`);
-      }
-
-      const parser = new PDFParse();
-      if (typeof (parser as any).load !== "function" || typeof (parser as any).getText !== "function") {
-        throw new Error("pdf-parse: PDFParse instance missing load/getText methods");
-      }
-
-      await (parser as any).load(buf as Buffer);
-      const text = await (parser as any).getText();
-      if (typeof text === "string") return text;
-      if (text && typeof (text as any).text === "string") return String((text as any).text);
+      const mod = await import("pdf-parse/lib/pdf-parse.js");
+      const pdfParse = (mod as any).default ?? mod;
+      const data = await pdfParse(buf);
+      if (typeof data?.text === "string") return data.text;
       return "";
     } catch (err) {
       console.error('[KB BUILD] pdf-parse failed:', err);
@@ -161,7 +152,7 @@ export async function POST() {
     return NextResponse.json({ status: "empty", message: "No files uploaded" }, { status: 400 });
   }
 
-  const build = await (prisma as any).knowledgeBaseBuild.create({
+  const build = await prisma.knowledgeBaseBuild.create({
     data: {
       userId,
       status: "building",
@@ -308,10 +299,8 @@ export async function POST() {
                 const preferredPath = isSafeStorageKey(canonicalKey) ? canonicalKey : key;
                 if (preferredPath !== storagePath) {
                   try {
-                    if (typeof (prisma as any)?.file?.update === 'function') {
-                      await (prisma as any).file.update({ where: { id: file.id }, data: { path: preferredPath } });
-                      console.log('[KB BUILD] Updated DB storage path for file', file.id, '->', preferredPath);
-                    }
+                    await prisma.file.update({ where: { id: file.id }, data: { path: preferredPath } });
+                    console.log('[KB BUILD] Updated DB storage path for file', file.id, '->', preferredPath);
                   } catch (uErr) {
                     console.error('[KB BUILD] Failed to update DB path for', file.id, uErr);
                   }
@@ -444,7 +433,7 @@ export async function POST() {
   const buildStatus = processed > 0 ? 'ready' : 'failed';
   const completedAt = new Date();
 
-  await (prisma as any).knowledgeBaseBuild.update({ where: { id: build.id }, data: { status: buildStatus, completedAt, processed, failed, error: processed > 0 ? null : 'No files could be processed. Check KnowledgeBaseJob errors for details.' } });
+  await prisma.knowledgeBaseBuild.update({ where: { id: build.id }, data: { status: buildStatus, completedAt, processed, failed, error: processed > 0 ? null : 'No files could be processed. Check KnowledgeBaseJob errors for details.' } });
 
   await prisma.knowledgeBaseStatus.upsert({ where: { userId }, update: { status: finalStatus, lastBuildId: build.id } as any, create: { userId, status: finalStatus, lastBuildId: build.id } as any });
 

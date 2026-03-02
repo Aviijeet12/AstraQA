@@ -1,8 +1,2 @@
-import { PrismaClient } from "@prisma/client"
-import { DATABASE_URL } from "./env"
-
-export const prisma = new PrismaClient({
-  datasources: {
-    db: { url: DATABASE_URL },
-  },
-})
+// Re-export prisma singleton from the canonical module to avoid duplicate PrismaClient instances.
+export { prisma } from "./prisma"

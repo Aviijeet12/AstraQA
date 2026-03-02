@@ -16,6 +16,10 @@ export const GEMINI_API_KEY = optional(process.env.GEMINI_API_KEY)
 export const ANTHROPIC_API_KEY = optional(process.env.ANTHROPIC_API_KEY)
 export const ANTHROPIC_MODEL = optional(process.env.ANTHROPIC_MODEL)
 export const HF_API_KEY = optional(process.env.HF_API_KEY)
+export const HF_BASE_URL = optional(process.env.HF_BASE_URL) || "https://router.huggingface.co/v1"
+export const HF_MODEL_NAME = optional(process.env.HF_MODEL_NAME) || "meta-llama/Llama-3.1-8B-Instruct"
+export const HF_FALLBACK_MODEL_NAME = optional(process.env.HF_FALLBACK_MODEL_NAME) || "Qwen/Qwen2.5-7B-Instruct"
+export const HF_MAX_TOKENS = Number(process.env.HF_MAX_TOKENS) || 1024
 export const SUPABASE_URL = optional(process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL)
 export const SUPABASE_KEY = optional(
   process.env.SUPABASE_KEY ??

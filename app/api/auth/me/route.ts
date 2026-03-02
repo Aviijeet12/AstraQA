@@ -1,33 +1,15 @@
 import { NextResponse } from "next/server";
-import { verify } from "jsonwebtoken";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/nextauth";
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const cookieHeader = req.headers.get("cookie");
-    if (!cookieHeader) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
       return NextResponse.json({ user: null }, { status: 401 });
     }
 
-    const token = cookieHeader
-      .split("; ")
-      .find((c) => c.startsWith("token="))
-      ?.split("=")[1];
-
-    if (!token) {
-      return NextResponse.json({ user: null }, { status: 401 });
-    }
-
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      console.error("❌ Missing JWT_SECRET");
-      return NextResponse.json(
-        { error: "Server config missing" },
-        { status: 500 }
-      );
-    }
-
-    const user = verify(token, secret);
-    return NextResponse.json({ user }, { status: 200 });
+    return NextResponse.json({ user: session.user }, { status: 200 });
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message },

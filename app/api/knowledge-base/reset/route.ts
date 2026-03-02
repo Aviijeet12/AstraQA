@@ -23,7 +23,7 @@ export async function POST() {
     prisma.knowledgeBaseStatus.deleteMany({ where: { userId } }),
     prisma.chunk.deleteMany({ where: { fileId: { in: fileIds } } }),
     prisma.knowledgeBaseJob.deleteMany({ where: { fileId: { in: fileIds } } }),
-    (prisma as any).knowledgeBaseBuild.deleteMany({ where: { userId } }),
+    prisma.knowledgeBaseBuild.deleteMany({ where: { userId } }),
     prisma.testCase.deleteMany({ where: { userId } }),
     prisma.script.deleteMany({ where: { userId } }),
     prisma.file.deleteMany({ where: { id: { in: fileIds } } }),

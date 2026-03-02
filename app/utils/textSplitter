@@ -6,8 +6,10 @@ export function splitTextIntoChunks(text: string, maxChars = 1500, overlap = 200
     const end = Math.min(start + maxChars, text.length);
     const slice = text.slice(start, end);
     chunks.push(slice);
-    start = end - overlap;
-    if (start < 0) start = 0;
+    if (end >= text.length) break;
+    const next = end - overlap;
+    // Guard against infinite loop when overlap >= maxChars
+    start = next <= start ? start + 1 : next;
   }
   return chunks;
 }

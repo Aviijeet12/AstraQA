@@ -24,7 +24,7 @@ export async function GET() {
       where: { userId },
       select: { status: true, updatedAt: true },
     }),
-    (prisma as any).knowledgeBaseBuild?.findFirst?.({
+    prisma.knowledgeBaseBuild.findFirst({
       where: { userId },
       orderBy: { startedAt: "desc" },
       select: {
@@ -36,7 +36,7 @@ export async function GET() {
         failed: true,
         error: true,
       },
-    }) ?? Promise.resolve(null),
+    }),
   ]);
 
   const lastBuild = latestBuild

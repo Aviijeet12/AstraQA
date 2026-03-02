@@ -25,7 +25,8 @@ export async function callGemini(
   })
 
   if (!res.ok) {
-    throw new Error(`Gemini API error: ${res.status} ${res.statusText}`)
+    const body = await res.text().catch(() => "");
+    throw new Error(`Gemini API error: ${res.status} ${res.statusText} – ${body.slice(0, 300)}`);
   }
 
   return res.json()

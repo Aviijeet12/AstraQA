@@ -8,14 +8,14 @@ export async function callHuggingFace(
   apiKey?: string,
   opts?: { signal?: AbortSignal; maxAttempts?: number },
 ) {
-  const { HF_API_KEY } = await import("./env")
+  const { HF_API_KEY, HF_BASE_URL } = await import("./env")
   const key = (typeof apiKey === "string" && apiKey.trim().length > 0 ? apiKey.trim() : null) ?? HF_API_KEY
   if (!key) {
     throw new Error("Missing HF_API_KEY (required for HuggingFace calls)")
   }
 
   // HF deprecated api-inference.huggingface.co; router is the supported replacement.
-  const url = "https://router.huggingface.co/v1/chat/completions"
+  const url = `${HF_BASE_URL}/chat/completions`
 
   const maxAttempts = Math.max(1, Math.min(5, opts?.maxAttempts ?? 3))
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

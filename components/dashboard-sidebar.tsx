@@ -56,7 +56,7 @@ export function DashboardSidebar() {
               <span
                 className={cn(
                   "group flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors",
-                  pathname === item.href ? "bg-accent text-accent-foreground" : "transparent",
+                  pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href)) ? "bg-accent text-accent-foreground" : "transparent",
                 )}
               >
                 <item.icon className="mr-2 h-4 w-4" />
