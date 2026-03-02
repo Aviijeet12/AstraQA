@@ -1,5 +1,4 @@
 {
-  "installCommand": "pnpm install",
   "buildCommand": "pnpm run migrate:deploy && pnpm run build",
   "build": {
     "env": {
