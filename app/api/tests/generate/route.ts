@@ -8,6 +8,7 @@ import { callAnthropic } from "@/lib/anthropic";
 import { callHuggingFace } from "@/lib/hf";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 type OutTestCase = {
   id: string;
@@ -127,8 +128,8 @@ export async function POST(req: Request) {
   const rag = await retrieveChunks({ userId, query: prompt, topK: ragTopK });
 
   // Truncate individual chunks and overall context to keep prompts snappy.
-  const MAX_CHUNK_CHARS = 1200;
-  const MAX_CONTEXT_CHARS = 14_000;
+  const MAX_CHUNK_CHARS = 800;
+  const MAX_CONTEXT_CHARS = 6_000;
   let context = rag.chunks
     .map((c, i) =>
       [
@@ -215,7 +216,7 @@ export async function POST(req: Request) {
             effectiveAnthropicKey,
             { signal },
           ),
-        30_000,
+        20_000,
         "Anthropic",
       )
 
@@ -257,7 +258,7 @@ export async function POST(req: Request) {
             effectiveGeminiKey,
             { signal },
           ),
-        25_000,
+        15_000,
         "Gemini",
       );
 
@@ -304,40 +305,27 @@ export async function POST(req: Request) {
               max_tokens: HF_MAX_TOKENS,
             },
             undefined,
-            { signal, maxAttempts: 2 },
+            { signal, maxAttempts: 1 },
           ),
-        25_000,
+        15_000,
         "HuggingFace",
       )
       return extractText(resp)
     }
 
-    // Attempt generation+parse quickly per model to avoid returning obviously non-JSON text.
+    // Try each model once — keep it fast for Vercel's function timeout.
     for (const modelId of hfModels) {
-      const raw = await tryModel(modelId, userText)
       try {
+        const raw = await tryModel(modelId, userText)
         const parsed = JSON.parse(extractJson(raw))
         const v = validateAndNormalize(parsed, { count: desiredCount, base, suffix, minValid })
         if (v.ok) return raw
       } catch {
-        // ignore parse errors; try repair below
-      }
-
-      // One repair attempt for this model.
-      const repaired = await tryModel(
-        modelId,
-        `${userText}\n\nYour output must be ONLY a valid JSON array. No prose. Start with '[' and end with ']'.`,
-      )
-      try {
-        const parsed2 = JSON.parse(extractJson(repaired))
-        const v2 = validateAndNormalize(parsed2, { count: desiredCount, base, suffix, minValid })
-        if (v2.ok) return repaired
-      } catch {
-        // ignore
+        // try next model
       }
     }
 
-    // Give the caller the last attempt (it will error with a helpful validation message).
+    // Final attempt with primary model.
     return await tryModel(hfModels[0]!, userText)
   };
 
@@ -383,7 +371,7 @@ export async function POST(req: Request) {
                 (r: any) =>
                   r?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("\n") || "",
               ),
-            25_000,
+            15_000,
             "Gemini-fallback",
           );
         } else if (fb === "anthropic") {
@@ -412,7 +400,7 @@ export async function POST(req: Request) {
                   return blocks.map((b: any) => (typeof b?.text === "string" ? b.text : "")).filter(Boolean).join("\n");
                 return typeof resp?.content?.[0]?.text === "string" ? resp.content[0].text : JSON.stringify(resp);
               }),
-            30_000,
+            15_000,
             "Anthropic-fallback",
           );
         } else {
@@ -432,7 +420,7 @@ export async function POST(req: Request) {
                   max_tokens: HF_MAX_TOKENS,
                 },
                 undefined,
-                { signal, maxAttempts: 2 },
+                { signal, maxAttempts: 1 },
               ).then((resp: any) => {
                 const content = resp?.choices?.[0]?.message?.content;
                 if (typeof content === "string") return content;
@@ -440,7 +428,7 @@ export async function POST(req: Request) {
                 if (typeof text === "string") return text;
                 return typeof resp === "string" ? resp : JSON.stringify(resp);
               }),
-            25_000,
+            15_000,
             "HuggingFace-fallback",
           );
         }
@@ -484,41 +472,14 @@ export async function POST(req: Request) {
       });
     }
 
-    // One repair attempt: tell the model what failed and ask for corrected JSON only.
-    const repairPrompt =
-      `Your previous output was invalid: ${v1.error}.\n` +
-      `Return ONLY valid JSON for exactly ${desiredCount} test cases.\n` +
-      "Do not include any extra keys. Ensure each has 4-10 steps and a non-empty expectedResult.";
-
-    const repairedRaw = await runLLM(`${prompt}\n\n${repairPrompt}`);
-    const parsed2 = JSON.parse(extractJson(repairedRaw));
-    const v2 = validateAndNormalize(parsed2, { count: desiredCount, base, suffix, minValid });
-    if (!v2.ok) {
-      return NextResponse.json(
-        {
-          error: "LLM returned invalid output",
-          message: v2.error,
-        },
-        { status: 502 },
-      );
-    }
-
-    await prisma.testCase.createMany({
-      data: v2.testCases.map((t) => ({
-        userId,
-        testId: t.id,
-        feature: t.feature,
-        scenario: t.scenario,
-        steps: t.steps,
-        expected: t.expectedResult,
-        type: t.type,
-      })),
-    });
-
-    return NextResponse.json({
-      testCases: v2.testCases,
-      rag: { mode: rag.mode, chunks: rag.chunks.map((c) => ({ id: c.chunkId, score: c.score })) },
-    });
+    // If validation failed, return the error instead of making another slow LLM call.
+    return NextResponse.json(
+      {
+        error: "LLM returned invalid output",
+        message: v1.error,
+      },
+      { status: 502 },
+    );
   } catch (e) {
     return NextResponse.json(
       {

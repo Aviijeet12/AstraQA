@@ -1,10 +1,15 @@
 {
-  "installCommand": "npm install",
-  "buildCommand": "npm run migrate:deploy && npm run build",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm run migrate:deploy && pnpm run build",
   "build": {
     "env": {
       "NODE_VERSION": "20",
       "PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK": "1"
+    }
+  },
+  "functions": {
+    "app/api/tests/generate/route.ts": {
+      "maxDuration": 60
     }
   }
 }
